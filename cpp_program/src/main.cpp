@@ -1,9 +1,11 @@
 #include "Heat.hpp"
+#include <deal.II/base/utilities.h>
 
 // Main function.
 int
 main(int argc, char *argv[])
 {
+  Utilities::MPI::MPI_InitFinalize mpi_init(argc, argv);
   if (argc < 2)
     {
       std::cerr << "Usage: " << argv[0] << " <parameter_file>" << std::endl;

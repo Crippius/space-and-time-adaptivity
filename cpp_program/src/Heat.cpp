@@ -103,12 +103,12 @@ Heat::create_mesh()
   // Create the cube mesh.
   // This method generates a hypercube mesh in the unit cube [0,1]^dim.
 
-  std::cout << "Creating cube mesh" << std::endl;
+  pcout << "Creating cube mesh" << std::endl;
   
   GridGenerator::hyper_cube(mesh, 0.0, 1.0);
   mesh.refine_global(n_global_refinements);
   
-  std::cout << "  Number of elements = " << mesh.n_active_cells()
+  pcout << "  Number of elements = " << mesh.n_active_cells()
         << std::endl;
 }
 
@@ -117,73 +117,77 @@ Heat::setup()
 {
   // Create the mesh.
   {
-    std::cout << "Initializing the mesh" << std::endl;
+    pcout << "Initializing the mesh" << std::endl;
     create_mesh();
   }
 
-  std::cout << "-----------------------------------------------" << std::endl;
+  pcout << "-----------------------------------------------" << std::endl;
 
   // Initialize the finite element space.
   {
-    std::cout << "Initializing the finite element space" << std::endl;
+    pcout << "Initializing the finite element space" << std::endl;
 
     fe = std::make_unique<FE_Q<dim>>(r);
 
-    std::cout << "  Degree                     = " << fe->degree << std::endl;
-    std::cout << "  DoFs per cell              = " << fe->dofs_per_cell
+    pcout << "  Degree                     = " << fe->degree << std::endl;
+    pcout << "  DoFs per cell              = " << fe->dofs_per_cell
           << std::endl;
 
     quadrature = std::make_unique<QGauss<dim>>(r + 1);
 
-    std::cout << "  Quadrature points per cell = " << quadrature->size()
+    pcout << "  Quadrature points per cell = " << quadrature->size()
           << std::endl;
   }
 
-  std::cout << "-----------------------------------------------" << std::endl;
+  pcout << "-----------------------------------------------" << std::endl;
 
   // Initialize the DoF handler.
   {
-    std::cout << "Initializing the DoF handler" << std::endl;
+    pcout << "Initializing the DoF handler" << std::endl;
 
     dof_handler.reinit(mesh);
     dof_handler.distribute_dofs(*fe);
-
-    std::cout << "  Number of DoFs = " << dof_handler.n_dofs() << std::endl;
+    locally_owned_dofs = dof_handler.locally_owned_dofs();
+    locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
+    pcout << "  Number of DoFs = " << dof_handler.n_dofs() << std::endl;
   }
 
-  // Set up constraints for hanging nodes
-  setup_constraints();
-
-  std::cout << "-----------------------------------------------" << std::endl;
+  pcout << "-----------------------------------------------" << std::endl;
 
   // Initialize the linear system.
   {
-    std::cout << "Initializing the linear system" << std::endl;
+    pcout << "Initializing the linear system" << std::endl;
 
-    std::cout << "  Initializing the sparsity pattern" << std::endl;
+    pcout << "  Initializing the sparsity pattern" << std::endl;
 
-    DynamicSparsityPattern dsp(dof_handler.n_dofs());
-    DoFTools::make_sparsity_pattern(dof_handler, dsp, constraints);
-    sparsity_pattern.copy_from(dsp);
+    constraints.clear();
+    constraints.reinit(locally_relevant_dofs);
+    DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+    constraints.close();
 
-    std::cout << "  Initializing the matrices" << std::endl;
-    mass_matrix.reinit(sparsity_pattern);
-    stiffness_matrix.reinit(sparsity_pattern);
-    lhs_matrix.reinit(sparsity_pattern);
-    rhs_matrix.reinit(sparsity_pattern);
+    TrilinosWrappers::SparsityPattern sparsity(locally_owned_dofs, MPI_COMM_WORLD);
+    DoFTools::make_sparsity_pattern(dof_handler, sparsity, constraints, /*keep_constrained_dofs=*/false);
+    sparsity.compress();
 
-    std::cout << "  Initializing the system right-hand side" << std::endl;
-    system_rhs.reinit(dof_handler.n_dofs());
-    std::cout << "  Initializing the solution vector" << std::endl;
-    solution.reinit(dof_handler.n_dofs());
+    pcout << "  Initializing the matrices" << std::endl;
+    mass_matrix.reinit(sparsity);
+    stiffness_matrix.reinit(sparsity);
+    lhs_matrix.reinit(sparsity);
+    rhs_matrix.reinit(sparsity);
+
+    pcout << "  Initializing the system right-hand side" << std::endl;
+    system_rhs.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+    pcout << "  Initializing the solution vector" << std::endl;
+    solution_owned.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+    solution.reinit(locally_owned_dofs, locally_relevant_dofs, MPI_COMM_WORLD);
   }
 }
 
 void
 Heat::assemble_matrices()
 {
-  std::cout << "===============================================" << std::endl;
-  std::cout << "Assembling the system matrices" << std::endl;
+  pcout << "===============================================" << std::endl;
+  pcout << "Assembling the system matrices" << std::endl;
 
   const unsigned int dofs_per_cell = fe->dofs_per_cell;
   const unsigned int n_q           = quadrature->size();
@@ -203,6 +207,8 @@ Heat::assemble_matrices()
 
   for (const auto &cell : dof_handler.active_cell_iterators())
     {
+      if (!cell->is_locally_owned())
+        continue;
       fe_values.reinit(cell);
 
       cell_mass_matrix      = 0.0;
@@ -230,15 +236,13 @@ Heat::assemble_matrices()
 
       cell->get_dof_indices(dof_indices);
 
-      // Apply constraints while assembling
-      constraints.distribute_local_to_global(cell_mass_matrix, 
-                                            dof_indices, 
-                                            mass_matrix);
-                                            
-      constraints.distribute_local_to_global(cell_stiffness_matrix, 
-                                           dof_indices, 
-                                           stiffness_matrix);
+      // Apply constraints while assembling into global matrices
+      constraints.distribute_local_to_global(cell_mass_matrix, dof_indices, mass_matrix);
+      constraints.distribute_local_to_global(cell_stiffness_matrix, dof_indices, stiffness_matrix);
     }
+
+  mass_matrix.compress(VectorOperation::add);
+  stiffness_matrix.compress(VectorOperation::add);
 
   // We build the matrix on the left-hand side of the algebraic problem (the one
   // that we'll invert at each timestep).
@@ -270,6 +274,8 @@ Heat::assemble_rhs(const double &time)
 
   for (const auto &cell : dof_handler.active_cell_iterators())
     {
+      if (!cell->is_locally_owned())
+        continue;
       fe_values.reinit(cell);
 
       cell_rhs = 0.0;
@@ -295,8 +301,8 @@ Heat::assemble_rhs(const double &time)
       cell->get_dof_indices(dof_indices);
       constraints.distribute_local_to_global(cell_rhs, dof_indices, system_rhs);
     }
-
-  rhs_matrix.vmult_add(system_rhs, solution);
+  system_rhs.compress(VectorOperation::add);
+  rhs_matrix.vmult_add(system_rhs, solution_owned);
 }
 
 void
@@ -304,15 +310,18 @@ Heat::solve_time_step()
 {
   SolverControl solver_control(1000, 1e-6 * system_rhs.l2_norm());
 
-  SolverCG<Vector<double>> solver(solver_control);
-  PreconditionSSOR<SparseMatrix<double>> preconditioner;
-  preconditioner.initialize(lhs_matrix, 1.0);
+  SolverCG<TrilinosWrappers::MPI::Vector> solver(solver_control);
+  TrilinosWrappers::PreconditionSSOR      preconditioner;
+  preconditioner.initialize(
+    lhs_matrix, TrilinosWrappers::PreconditionSSOR::AdditionalData(1.0));
 
-  solver.solve(lhs_matrix, solution, system_rhs, preconditioner);
+  solver.solve(lhs_matrix, solution_owned, system_rhs, preconditioner);
+  // Enforce hanging-node constraints on the solution
+  constraints.distribute(solution_owned);
   
-  constraints.distribute(solution);
+  pcout << "  " << solver_control.last_step() << " CG iterations" << std::endl;
   
-  std::cout << "  " << solver_control.last_step() << " CG iterations" << std::endl;
+  solution = solution_owned;
 }
 
 void
@@ -324,146 +333,159 @@ Heat::output(const unsigned int &time_step) const
 
   data_out.build_patches();
 
-  std::ofstream output("output_" + std::to_string(time_step) + ".vtu");
-  data_out.write_vtu(output);
+  data_out.write_vtu_with_pvtu_record("./",
+                                      "output_",
+                                      time_step,
+                                      MPI_COMM_WORLD,
+                                      3);
 }
 
 void
 Heat::refine_grid()
 {
+  pcout << "\n[Space adaptivity] Performing adaptive mesh refinement" << std::endl;
 
-  std::cout << std::endl <<  "[Space adaptivity] Performing adaptive mesh refinement" << std::endl;
+  pcout << " Refining grid based on error estimation" << std::endl;
+  pcout << "  Number of active cells before refinement: "
+        << mesh.n_active_cells() << std::endl;
 
-  std::cout << " Refining grid based on error estimation" << std::endl;
-  std::cout << "  Number of active cells before refinement: " 
-            << mesh.n_active_cells() << std::endl;
-  
   Vector<float> estimated_error_per_cell(mesh.n_active_cells());
   // ESTIMATE
   KellyErrorEstimator<dim>::estimate(dof_handler,
-                                    QGauss<dim - 1>(r + 1),
-                                    {}, 
-                                    solution,
-                                    estimated_error_per_cell);
-  
-  // MARK
-  GridRefinement::refine_and_coarsen_fixed_number(mesh,
-                                                 estimated_error_per_cell,
-                                                 refinement_percent,
-                                                 coarsening_percent);
-  
-  // REFINE
-  SolutionTransfer<dim> solution_transfer(dof_handler);
+                                     QGauss<dim - 1>(r + 1),
+                                     {},
+                                     solution,
+                                     estimated_error_per_cell);
+
+  // MARK (use parallel-aware refinement marking)
+  parallel::distributed::GridRefinement::refine_and_coarsen_fixed_number(
+    mesh,
+    estimated_error_per_cell,
+    refinement_percent,
+    coarsening_percent);
+
+  // REFINE + TRANSFER (MPI)
+  parallel::distributed::SolutionTransfer<dim, TrilinosWrappers::MPI::Vector>
+    sol_trans(dof_handler);
+
+  // Use ghosted solution for prepare to improve interface accuracy
   mesh.prepare_coarsening_and_refinement();
-  solution_transfer.prepare_for_coarsening_and_refinement(solution);
+  sol_trans.prepare_for_coarsening_and_refinement(solution);
   mesh.execute_coarsening_and_refinement();
-  
-  std::cout << "  Number of active cells after refinement: " 
-            << mesh.n_active_cells() << std::endl;
-  
+
+  // Redistribute DoFs and rebuild LA objects
   dof_handler.distribute_dofs(*fe);
-  std::cout << "  Number of DoFs after refinement = " << dof_handler.n_dofs() << std::endl;
-  
-    
-  // Reinitialize the DoF handler and constraints
+  locally_owned_dofs    = dof_handler.locally_owned_dofs();
+  locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
+  pcout << "  Number of DoFs after refinement = " << dof_handler.n_dofs() << std::endl;
 
-  setup_constraints();
-  
-  DynamicSparsityPattern dsp(dof_handler.n_dofs());
-  DoFTools::make_sparsity_pattern(dof_handler, dsp, constraints);
-  sparsity_pattern.copy_from(dsp);
-  
-  mass_matrix.reinit(sparsity_pattern);
-  stiffness_matrix.reinit(sparsity_pattern);
-  lhs_matrix.reinit(sparsity_pattern);
-  rhs_matrix.reinit(sparsity_pattern);
-  
-  Vector<double> new_solution(dof_handler.n_dofs());
-  system_rhs.reinit(dof_handler.n_dofs());
-  
-  solution_transfer.interpolate(solution, new_solution);
-  solution.reinit(dof_handler.n_dofs());
-  solution = new_solution;
-  constraints.distribute(solution);
+  // Constraints
+  constraints.clear();
+  constraints.reinit(locally_relevant_dofs);
+  DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+  constraints.close();
 
-  std::cout << "  Reassembling matrices for the refined mesh" << std::endl;
+  // Rebuild sparsity + matrices
+  {
+    TrilinosWrappers::SparsityPattern sparsity(locally_owned_dofs, MPI_COMM_WORLD);
+    DoFTools::make_sparsity_pattern(dof_handler, sparsity, constraints, /*keep_constrained_dofs=*/false);
+    sparsity.compress();
+
+    mass_matrix.reinit(sparsity);
+    stiffness_matrix.reinit(sparsity);
+    lhs_matrix.reinit(sparsity);
+    rhs_matrix.reinit(sparsity);
+  }
+
+  // Reinit vectors
+  system_rhs.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+  solution_owned.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+  solution.reinit(locally_owned_dofs, locally_relevant_dofs, MPI_COMM_WORLD);
+
+  // Interpolate solution onto new mesh (owned vector)
+  sol_trans.interpolate(solution_owned);
+  constraints.distribute(solution_owned);
+  solution = solution_owned;
+
+  pcout << "  Reassembling matrices for the refined mesh" << std::endl;
   assemble_matrices();
 }
 
-void
-Heat::setup_constraints()
+double Heat::estimate_time_error(const double &time, const TrilinosWrappers::MPI::Vector &prev_solution_owned, double trial_deltat)
 {
-  std::cout << "Setting up constraints" << std::endl;
-  
-  constraints.clear();
-  DoFTools::make_hanging_node_constraints(dof_handler, constraints);
-  constraints.close();
-}
-
-double Heat::estimate_time_error(const double &time, const Vector<double> &prev_solution, double trial_deltat)
-{
-  Vector<double> backup_solution = solution;
+  TrilinosWrappers::MPI::Vector backup_solution = solution_owned;
   double backup_deltat = deltat;
   double eps = 1e-8;
   
   // Big Step Solution
   deltat = trial_deltat;
-  solution = prev_solution;
+  // Reassemble matrices since they depend on deltat
+  assemble_matrices();
+  solution_owned = prev_solution_owned;
+  solution = solution_owned;
   assemble_rhs(time + trial_deltat);
   solve_time_step();
-  Vector<double> sol_big_step = solution;
+  TrilinosWrappers::MPI::Vector sol_big_step = solution_owned;
 
   // Two Half Steps Solution
   deltat = trial_deltat / 2.0;
-  solution = prev_solution;
+  // Reassemble matrices for half-step deltat
+  assemble_matrices();
+  solution_owned = prev_solution_owned;
+  solution = solution_owned;
   assemble_rhs(time + deltat);
   solve_time_step();
-  Vector<double> sol_half_step = solution;
+  TrilinosWrappers::MPI::Vector sol_half_step = solution_owned;
   assemble_rhs(time + 2.0 * deltat);
   solve_time_step();
-  Vector<double> sol_two_half_steps = solution;
+  TrilinosWrappers::MPI::Vector sol_two_half_steps = solution_owned;
 
   // Compute the error estimate
   sol_big_step -= sol_two_half_steps;
   double error = sol_big_step.l2_norm()/(sol_two_half_steps.l2_norm() + eps);
 
-  solution = backup_solution;
+  solution_owned = backup_solution;
+  solution = solution_owned;
   deltat = backup_deltat;
+  // Restore matrices for original deltat
+  assemble_matrices();
 
   return error;
 }
 
-void Heat::update_deltat(double time, Vector<double> &prev_solution) {
+void Heat::update_deltat(double time, TrilinosWrappers::MPI::Vector &prev_solution_owned) {
   bool step_accepted = false;
   double trial_deltat = deltat;
   double local_time = time;
   double prev_deltat = 0;
 
-  prev_solution = solution;
+  prev_solution_owned = solution_owned;
 
   while (!step_accepted)
   {
-    double time_error = estimate_time_error(local_time, prev_solution, trial_deltat);
+    double time_error = estimate_time_error(local_time, prev_solution_owned, trial_deltat);
     if (time_error < time_error_lower_bound && trial_deltat * 2.0 <= max_deltat && trial_deltat * 2.0 != prev_deltat)
     {
       // Increase the time step
       prev_deltat = trial_deltat;
       trial_deltat *= 2.0;
-      std::cout << "[Time adaptivity] Time error " << time_error << " < lower bound. Increasing deltat to " << trial_deltat << std::endl;
+      pcout << "[Time adaptivity] Time error " << time_error << " < lower bound. Increasing deltat to " << trial_deltat << std::endl;
     }
     else if (time_error > time_error_upper_bound && trial_deltat / 2.0 >= min_deltat && trial_deltat / 2.0 != prev_deltat)
     {
       // Decrease the time step
       prev_deltat = trial_deltat;
       trial_deltat /= 2.0;
-      std::cout << "[Time adaptivity] Time error " << time_error << " > upper bound. Decreasing deltat to " << trial_deltat << std::endl;
+      pcout << "[Time adaptivity] Time error " << time_error << " > upper bound. Decreasing deltat to " << trial_deltat << std::endl;
     }
     else
     {
       // Accept the time step
       deltat = trial_deltat;
       step_accepted = true;
-      std::cout << "[Time adaptivity] Time error " << time_error << " -> reasonable. Not changing anything" << std::endl;
+      pcout << "[Time adaptivity] Time error " << time_error << " -> reasonable. Not changing anything" << std::endl;
+      // Reassemble matrices to reflect the accepted deltat
+      assemble_matrices();
     }
   }
 }
@@ -485,13 +507,15 @@ Heat::solve()
   time_assemble_matrices += t1 - t0;
   ++num_assemblies; 
 
-  std::cout << "===============================================" << std::endl;
+  pcout << "===============================================" << std::endl;
 
   {
-    std::cout << "Applying the initial condition" << std::endl;
-    VectorTools::interpolate(dof_handler, u_0, solution);
+    pcout << "Applying the initial condition" << std::endl;
+    VectorTools::interpolate(dof_handler, u_0, solution_owned);
+    constraints.distribute(solution_owned);
+    solution = solution_owned;
     output(0);
-    std::cout << "-----------------------------------------------" << std::endl;
+    pcout << "-----------------------------------------------" << std::endl;
   }
   
   unsigned int time_step = 0;
@@ -510,7 +534,7 @@ Heat::solve()
     }
       
     if (enable_time_adaptivity && time_step > 0 && time_step % time_adapt_interval == 0) // Time adaptivity
-      update_deltat(time, solution);
+      update_deltat(time, solution_owned);
     
     time += deltat;
     if (time > T) {
@@ -519,7 +543,7 @@ Heat::solve()
     }
 
     ++time_step;
-    std::cout << "n = " << std::setw(3) << time_step << ", t = " << std::setw(5) << time << ", deltat = " << deltat << ":" << std::flush;
+    pcout << "n = " << std::setw(3) << time_step << ", t = " << std::setw(5) << time << ", deltat = " << deltat << ":" << std::flush;
 
     t0 = std::chrono::high_resolution_clock::now();
     assemble_rhs(time);
@@ -553,15 +577,15 @@ Heat::compute_and_print_metrics() const
   const double r_t_per_dof = total_time / n_dofs;
 
   // Print performance metrics
-  std::cout << "\n===============================================" << std::endl;
-  std::cout << "=== Performance Metrics Summary ===" << std::endl;
-  std::cout << "-----------------------------------------------" << std::endl;
-  std::cout << "Total Wall-clock time (t):              " << total_time << " s" << std::endl;
-  std::cout << "Final Degrees of Freedom (n_Omega):     " << n_dofs << std::endl;
-  std::cout << "Minimum cell diameter (h):              " << h_min << std::endl;
-  std::cout << "-----------------------------------------------" << std::endl;
-  std::cout << "Resolution & Resource Metrics:" << std::endl;
-  std::cout << "  - r_res (h / n_Omega):                " << r_res << std::endl;
-  std::cout << "  - r_t-per-DOF (t / n_Omega):          " << r_t_per_dof << " s/DOF" << std::endl;
-  std::cout << "===============================================" << std::endl;
+  pcout << "\n===============================================" << std::endl;
+  pcout << "=== Performance Metrics Summary ===" << std::endl;
+  pcout << "-----------------------------------------------" << std::endl;
+  pcout << "Total Wall-clock time (t):              " << total_time << " s" << std::endl;
+  pcout << "Final Degrees of Freedom (n_Omega):     " << n_dofs << std::endl;
+  pcout << "Minimum cell diameter (h):              " << h_min << std::endl;
+  pcout << "-----------------------------------------------" << std::endl;
+  pcout << "Resolution & Resource Metrics:" << std::endl;
+  pcout << "  - r_res (h / n_Omega):                " << r_res << std::endl;
+  pcout << "  - r_t-per-DOF (t / n_Omega):          " << r_t_per_dof << " s/DOF" << std::endl;
+  pcout << "===============================================" << std::endl;
 }

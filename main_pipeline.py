@@ -154,7 +154,10 @@ def run_error_computation(run_dir, reference_path):
     Esegue lo script di calcolo dell'errore, che scrive il risultato su un file temporaneo.
     Questo script poi legge e cancella il file.
     """
-    test_solution_path = run_dir / "output_9999.vtu"
+    # Prefer parallel output .pvtu (MPI), fallback to single .vtu (serial)
+    pvtu_path = run_dir / "output_9999.pvtu"
+    vtu_path = run_dir / "output_9999.vtu"
+    test_solution_path = pvtu_path if pvtu_path.exists() else vtu_path
     result_file_path = run_dir / "error_result.tmp"
 
     if not test_solution_path.exists():

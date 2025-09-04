@@ -4,6 +4,9 @@
 // Import necessary headers from deal.II library
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/parameter_handler.h>
+#include <deal.II/base/conditional_ostream.h>
+#include <deal.II/base/utilities.h>
+#include <deal.II/base/index_set.h>
 
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
@@ -13,23 +16,24 @@
 #include <deal.II/fe/fe_values.h>
 #include <deal.II/fe/fe_values_extractors.h>
 
+#include <deal.II/distributed/tria.h>
+#include <deal.II/distributed/grid_refinement.h>
 #include <deal.II/grid/grid_in.h>
 #include <deal.II/grid/grid_tools.h>
 #include <deal.II/grid/grid_refinement.h>
 #include <deal.II/grid/grid_generator.h>
 
 #include <deal.II/lac/solver_cg.h>
-#include <deal.II/lac/precondition.h>
-#include <deal.II/lac/sparse_matrix.h>
+#include <deal.II/lac/trilinos_precondition.h>
+#include <deal.II/lac/trilinos_sparse_matrix.h>
 #include <deal.II/lac/affine_constraints.h>
-#include <deal.II/lac/vector.h>
 
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/matrix_tools.h>
 #include <deal.II/numerics/vector_tools.h>
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/numerics/vector_tools_interpolate.h>
-#include <deal.II/numerics/solution_transfer.h>
+#include <deal.II/distributed/solution_transfer.h>
 
 // Include necessary standard libraries
 #include <fstream>
@@ -201,14 +205,13 @@ protected:
   void
   refine_grid();
 
-  // Setup for constraints (needed for hanging nodes in adaptive refinement)
-  void setup_constraints();
-
   // Estimate the time discretization error for the current step
-  double estimate_time_error(const double &time, const Vector<double> &prev_solution, double trial_deltat);
+  double estimate_time_error(const double &time,
+                             const TrilinosWrappers::MPI::Vector &prev_solution_owned,
+                             double trial_deltat);
 
   // Update the time step based on the error estimation
-  void update_deltat(double time, Vector<double> &prev_solution);
+  void update_deltat(double time, TrilinosWrappers::MPI::Vector &prev_solution_owned);
 
   // Output.
   void
@@ -226,8 +229,13 @@ protected:
   double       deltat;
   double       theta;
 
+  // MPI parallel metadata.
+  const unsigned int mpi_size = Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD);
+  const unsigned int mpi_rank = Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+  ConditionalOStream pcout{std::cout, mpi_rank == 0};
+
   // Mesh.
-  Triangulation<dim> mesh;
+  parallel::distributed::Triangulation<dim> mesh{MPI_COMM_WORLD};
 
   // Finite element space.
   std::unique_ptr<FiniteElement<dim>> fe;
@@ -237,18 +245,22 @@ protected:
 
   // DoF handler.
   DoFHandler<dim> dof_handler;
-  
-  // Constraints for hanging nodes in adaptive refinement
+
+  // Parallel index sets.
+  IndexSet locally_owned_dofs;
+  IndexSet locally_relevant_dofs;
+
+  // Constraints for hanging nodes
   AffineConstraints<double> constraints;
 
-  // Matrici e Vettori del sistema
-  SparseMatrix<double> mass_matrix;
-  SparseMatrix<double> stiffness_matrix;
-  SparseMatrix<double> lhs_matrix;
-  SparseMatrix<double> rhs_matrix;
-  Vector<double> system_rhs;
-  Vector<double> solution;
-  SparsityPattern sparsity_pattern;
+  // System matrices and vectors (Trilinos, MPI-aware)
+  TrilinosWrappers::SparseMatrix mass_matrix;
+  TrilinosWrappers::SparseMatrix stiffness_matrix;
+  TrilinosWrappers::SparseMatrix lhs_matrix;
+  TrilinosWrappers::SparseMatrix rhs_matrix;
+  TrilinosWrappers::MPI::Vector system_rhs;
+  TrilinosWrappers::MPI::Vector solution_owned; // without ghosts
+  TrilinosWrappers::MPI::Vector solution;       // with ghosts (for output)
 
   // Space Adaptativity Parameters. ///////////////////////////////////////////////////////////
   unsigned int n_global_refinements;
