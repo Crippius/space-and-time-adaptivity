@@ -4,6 +4,7 @@
 
 This project explores **adaptive methods** in both **space and time** for solving partial differential equations. We focus on the heat equation with a localized, time-dependent forcing term characterized by sharp, frequent impulses. The goal is to capture steep solution features accurately while minimizing computational cost through dynamic mesh and time step refinement based on error estimates. We implemented an adaptive solver using the ```deal.II``` library and evaluated its effectiveness in terms of accuracy and efficiency.
 
+# TODO add colab notebook and final results.csv file inside results folder
 
 # TODO add cool image
 ![cool_image]()
@@ -47,9 +48,20 @@ $$
 * **deal.II** ≥ 9.0.
 * **C++** compiler (C++11 or later).
 * **CMake** ≥ 3.12.
-* **Python** ≥3.6
 
+To utilize the automatic tester or visualize the solver's statistic on the notebook inside the results folder, you can set up the conda environment named `pdeEnv` to properly run the python scripts in two simple steps:
 
+---
+
+1. **Create the environment:**
+```bash
+conda env create -f pdeEnv.yml
+```
+
+2. **Activate the environment:**
+```bash
+conda activate pdeEnv
+```
 
 ## Compiling
 To build the executable, make sure you have loaded the needed modules with
@@ -66,20 +78,28 @@ $ make
 
 ## Execution
 
-# TODO make program take parameters from terminal
-
 The program can be executed from the `build` folder through
 
 ```bash
-$ ./main ... [optional]
+$ ./main path/to/parameter_file.prm
 ```
-where
-- ...
-- ...
-- Optional parameters:
-    - ...
-    - ...
-    - ...
+where ```parameter_file.prm``` is a file that contains all of the hyperparameters utilized by the solver like:
+- Space/Time Adaptivity flags
+- Discretization Details
+- More advanced parameters for space and time adaptivity
+
+The template parameter file at the root directory ```parameters_base.prm``` can be used for the execution by writing:
+
+```bash
+$ ./main ../../parameters_base.prm
+```
+
+To run the automatic tester that executes different configurations of the solver type:
+```bash
+$ python main_pipeline.py 
+```
+The program will save each simulation ```.vtu``` files inside a dedicated folder in the ```test_runs``` directory, together with the output log and their own parameter file. The summary of all the runs will be found inside ```results.csv```. 
+
 
 ## Project Structure
 

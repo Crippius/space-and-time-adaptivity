@@ -6,58 +6,53 @@ from pathlib import Path
 import sys
 import time
 
-# ====================================================================
-# 1. CONFIGURAZIONE DEI PERCORSI E DEI TEST
-# ====================================================================
 
-# Percorso dell'eseguibile C++
+### DEFINE PATHS
+
+# Path to the C++ executable
 EXECUTABLE_PATH = Path("./cpp_program/build/main").resolve()
 
-# Percorso dello script per il calcolo dell'errore
+# Path to the error computation script
 ERROR_SCRIPT_PATH = Path("./compute_error.py").resolve()
 
 # Percorso della soluzione di riferimento ("golden")
 GOLDEN_REFERENCE_PATH = Path("./golden_reference/ref_7_0.0005/solution_9999.pvtu").resolve()
 
-# Cartella principale dove verranno salvati tutti i risultati
+# Main directory where all results will be saved
 RUNS_DIR = Path("./test_runs").resolve()
 
-# File di parametri di base da cui partire
-BASE_PARAMETERS_FILE = Path("./parameters_base.txt").resolve()
+# Base parameter file to start from
+BASE_PARAMETERS_FILE = Path("./parameters_base.prm").resolve()
 
-# Nome del file CSV di output
+# Output CSV file name
 RESULTS_CSV_PATH = RUNS_DIR / "results.csv"
 
 
-# --- DEFINIZIONE DEI TEST DA ESEGUIRE ---
-test_configurations = [
-    {
-        "run_id": "high_refinement_adaptive",
-        "Adaptivity Control": {"Enable space adaptivity": "true"},
-        "Discretization": {"Global refinements": "4"},
-        "Space Adaptivity": {"Refinement fraction": "0.2", "Coarsening fraction": "0.8"},
-    },
-    {
-        "run_id": "low_refinement_adaptive",
-        "Adaptivity Control": {"Enable space adaptivity": "true"},
-        "Discretization": {"Global refinements": "2"},
-        "Space Adaptivity": {"Refinement fraction": "0.1", "Coarsening fraction": "0.9"},
-    },
-    {
-        "run_id": "uniform_mesh_no_adapt",
-        "Adaptivity Control": {"Enable space adaptivity": "false"},
-        "Discretization": {"Global refinements": "3"},
-    },
-    # Aggiungi qui altre configurazioni...
-]
+### SIMULATIONS TO TEST
+
+test_configurations = []
+
+for refinement in [1, 2, 3, 4, 5]:
+    for space_adaptivity in [True, False]:
+        for time_adaptivity in [True, False]:
+            run_id = f"refinement_{refinement}_space_{'adaptive' if space_adaptivity else 'not_adaptive'}_time_{'adaptive' if time_adaptivity else 'not_adaptive'}"
+            test_configurations.append({
+                "run_id": run_id,
+                "Adaptivity Control": {
+                    "Enable space adaptivity": str(space_adaptivity).lower(),
+                    "Enable time adaptivity": str(time_adaptivity).lower()
+                },
+                "Discretization": {"Global refinements": str(refinement)},
+            })
 
 
-# ====================================================================
-# 2. FUNZIONI HELPER
-# ====================================================================
 
+### HELPER FUNCTIONS
+# To work with parameter files
+
+# Make changes to parameter files 
 def modify_parameter_file(base_params_path, output_path, changes):
-    """Crea un nuovo file di parametri con una logica di parsing corretta."""
+    """Creates a new parameter file."""
     with open(base_params_path, "r") as f_in:
         lines = f_in.readlines()
 
@@ -94,10 +89,11 @@ def modify_parameter_file(base_params_path, output_path, changes):
 
     with open(output_path, "w") as f_out:
         f_out.writelines(modified_lines)
-    print(f"  -> File parametri creato in: {output_path}")
+    print(f"  -> Parameter file created at: {output_path}")
 
+# Parses the C++ simulation log and extracts metrics
 def parse_metrics_from_log(log_path):
-    """Analizza il log della simulazione C++ e estrae le metriche."""
+    """Parses the C++ simulation log and extracts metrics."""
     metrics = {}
     patterns = {
         "total_time": r"Total Wall-clock time \(t\):\s+([\d\.\-eE]+)",
@@ -116,10 +112,11 @@ def parse_metrics_from_log(log_path):
         metrics = {key: None for key in patterns}
     return metrics
 
+# Parses all parameters from a .prm file
 def parse_all_parameters_from_prm(prm_path):
     """
-    Legge un file .prm e estrae tutti i parametri definiti,
-    creando un dizionario.
+    Reads a .prm file and extracts all defined parameters,
+    creating a dictionary.
     """
     params = {}
     current_subsection = "General"
@@ -144,15 +141,16 @@ def parse_all_parameters_from_prm(prm_path):
                     full_key = f"param_{current_subsection.replace(' ', '_')}_{param_name}"
                     params[full_key] = param_value
     except IOError:
-        print(f"  -> ERRORE: Impossibile leggere il file dei parametri {prm_path}")
+        print(f"  -> ERROR: Unable to read parameter file {prm_path}")
         return {}
         
     return params
 
+# Runs the error computation script, which writes the result to a temporary file.
 def run_error_computation(run_dir, reference_path):
     """
-    Esegue lo script di calcolo dell'errore, che scrive il risultato su un file temporaneo.
-    Questo script poi legge e cancella il file.
+    Runs the error computation script, which writes the result to a temporary file.
+    This script then reads and deletes the file.
     """
     # Prefer parallel output .pvtu (MPI), fallback to single .vtu (serial)
     pvtu_path = run_dir / "output_9999.pvtu"
@@ -161,7 +159,7 @@ def run_error_computation(run_dir, reference_path):
     result_file_path = run_dir / "error_result.tmp"
 
     if not test_solution_path.exists():
-        print(f"  -> ERRORE: File soluzione 'output_9999.vtu' non trovato in {run_dir}")
+        print(f"  -> ERROR: Solution file 'output_9999.vtu' not found in {run_dir}")
         return None
     
     command = [
@@ -172,7 +170,7 @@ def run_error_computation(run_dir, reference_path):
         "--output-file", str(result_file_path)
     ]
     
-    print("  -> Calcolo dell'errore L2 (tramite file temporaneo)...")
+    print("  -> Computing L2 error (using temporary file)...")
     try:
         result = subprocess.run(
             command,
@@ -182,64 +180,60 @@ def run_error_computation(run_dir, reference_path):
             timeout=300 # Aumentato a 5 minuti per sicurezza
         )
         if not result_file_path.exists():
-            print("  -> ERRORE: Il file di risultato non è stato creato dallo script di errore.")
+            print("  -> ERROR: The result file was not created by the error script.")
             return None
         with open(result_file_path, 'r') as f:
             l2_error = float(f.read().strip())
-        print(f"  -> Errore L2 calcolato: {l2_error}")
+        print(f"  -> Computed L2 error: {l2_error}")
         return l2_error
     except subprocess.TimeoutExpired:
-        print("  -> ERRORE: Il calcolo dell'errore ha superato il tempo limite.")
+        print("  -> ERROR: Error computation exceeded the time limit.")
         return None
     except subprocess.CalledProcessError as e:
-        print(f"  -> ERRORE: Lo script di calcolo dell'errore è fallito (codice {e.returncode}).")
-        print(f"--- Messaggio di errore dallo script:\n{e.stderr}\n---")
+        print(f"  -> ERROR: The error computation script failed (code {e.returncode}).")
+        print(f"--- Error message from script:\n{e.stderr}\n---")
         return None
     except (ValueError, IndexError):
-        print("  -> ERRORE: Il file di risultato non conteneva un numero valido.")
+        print("  -> ERROR: The result file did not contain a valid number.")
         return None
     except Exception as e:
-        print(f"  -> ERRORE imprevisto durante il calcolo dell'errore: {e}")
+        print(f"  -> UNEXPECTED ERROR during error computation: {e}")
         return None
     finally:
         if result_file_path.exists():
             os.remove(result_file_path)
 
+# Writes the results to a CSV file
 def write_results_to_csv(filepath, data_list):
-    """Scrive la lista di dizionari in un file CSV."""
+    """Writes the list of dictionaries to a CSV file."""
     if not data_list:
-        print("Nessun dato da scrivere nel file CSV.")
+        print("No data to write to the CSV file.")
         return
     
-    # Raccoglie tutti gli header possibili da tutti i dizionari per non perdere dati
     all_headers = set()
     for d in data_list:
         all_headers.update(d.keys())
-    
-    # Mantiene un ordine consistente
     ordered_headers = sorted(list(all_headers))
 
     with open(filepath, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=ordered_headers)
         writer.writeheader()
         writer.writerows(data_list)
-    print(f"\n✅ Risultati finali salvati in: {filepath}")
+    print(f"\nFinal results saved in: {filepath}")
 
 
-# ====================================================================
-# 3. LOGICA PRINCIPALE DELLA PIPELINE
-# ====================================================================
 
+# MAIN
 def main():
-    """Funzione principale che orchestra la pipeline di test."""
+    """Main function that orchestrates the test pipeline."""
     RUNS_DIR.mkdir(exist_ok=True)
     all_results_data = []
 
-    print("🚀 Inizio della pipeline di test...")
+    print("Starting the test pipeline...")
 
     for i, config in enumerate(test_configurations):
         run_name = f"run_{i:03d}_{config.get('run_id', 'test')}"
-        print(f"\n--- Esecuzione Test: {run_name} ---")
+        print(f"\n--- Running Test: {run_name} ---")
 
         current_run_dir = RUNS_DIR / run_name
         current_run_dir.mkdir(exist_ok=True)
@@ -247,7 +241,7 @@ def main():
         params_path = current_run_dir / "parameters.prm"
         modify_parameter_file(BASE_PARAMETERS_FILE, params_path, config)
         
-        print("  -> Avvio della simulazione C++...")
+        print("  -> Starting C++ simulation...")
         command_str = f'"{str(EXECUTABLE_PATH)}" "{str(params_path)}"'
         log_path = current_run_dir / "stdout.log"
 
@@ -259,14 +253,14 @@ def main():
             )
             with open(log_path, "w") as f_log:
                 f_log.write(result.stdout)
-            print("  -> Simulazione completata con successo.")
+            print("  -> Simulation completed successfully.")
 
-            # Estrazione dei dati
+            # Data extraction
             all_params = parse_all_parameters_from_prm(params_path)
             perf_metrics = parse_metrics_from_log(log_path)
             l2_error = run_error_computation(current_run_dir, GOLDEN_REFERENCE_PATH)
             
-            # Calcolo delle metriche derivate
+            # Compute derived metrics
             derived_metrics = {}
             t = perf_metrics.get('total_time')
             n = perf_metrics.get('n_dofs')
@@ -277,7 +271,6 @@ def main():
             derived_metrics['r_t_to_sol'] = (t / e) if t is not None and e is not None and e > 0 else None
             derived_metrics['r_eff_res'] = (h / e) if h is not None and e is not None and e > 0 else None
             
-            # Unione di tutti i dati in un unico record
             current_run_results = {
                 "run_name": run_name,
                 **all_params,
@@ -288,7 +281,7 @@ def main():
             all_results_data.append(current_run_results)
 
         except subprocess.CalledProcessError as e:
-            print(f"  -> ERRORE: La simulazione C++ è fallita.")
+            print(f"  -> ERROR: The C++ simulation failed.")
             print(f"--- Stderr:\n{e.stderr}\n---------------")
             continue
         
@@ -296,7 +289,7 @@ def main():
 
 if __name__ == "__main__":
     if not all([p.exists() for p in [EXECUTABLE_PATH, ERROR_SCRIPT_PATH, GOLDEN_REFERENCE_PATH, BASE_PARAMETERS_FILE]]):
-        print("ERRORE: Uno o più file/percorsi essenziali non sono stati trovati.")
-        print(f"Controlla che esistano:\n- Eseguibile: {EXECUTABLE_PATH}\n- Script Errore: {ERROR_SCRIPT_PATH}\n- Riferimento: {GOLDEN_REFERENCE_PATH}\n- Parametri Base: {BASE_PARAMETERS_FILE}")
+        print("ERROR: One or more essential files/paths were not found.")
+        print(f"Check that the following exist:\n- Executable: {EXECUTABLE_PATH}\n- Error Script: {ERROR_SCRIPT_PATH}\n- Reference: {GOLDEN_REFERENCE_PATH}\n- Base Parameters: {BASE_PARAMETERS_FILE}")
     else:
         main()
