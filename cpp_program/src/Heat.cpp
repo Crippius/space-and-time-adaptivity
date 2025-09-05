@@ -440,9 +440,13 @@ double Heat::estimate_time_error(const double &time, const TrilinosWrappers::MPI
   solve_time_step();
   TrilinosWrappers::MPI::Vector sol_two_half_steps = solution_owned;
 
-  // Compute the error estimate
+  // Compute the error estimate (use global reductions)
   sol_big_step -= sol_two_half_steps;
-  double error = sol_big_step.l2_norm()/(sol_two_half_steps.l2_norm() + eps);
+  const double num = sol_big_step.l2_norm();
+  const double den = sol_two_half_steps.l2_norm() + eps;
+  double error = num / den;
+  // Synchronize error across ranks to make identical decision
+  error = Utilities::MPI::max(error, MPI_COMM_WORLD);
 
   solution_owned = backup_solution;
   solution = solution_owned;
@@ -464,6 +468,7 @@ void Heat::update_deltat(double time, TrilinosWrappers::MPI::Vector &prev_soluti
   while (!step_accepted)
   {
     double time_error = estimate_time_error(local_time, prev_solution_owned, trial_deltat);
+    time_error = Utilities::MPI::max(time_error, MPI_COMM_WORLD);
     if (time_error < time_error_lower_bound && trial_deltat * 2.0 <= max_deltat && trial_deltat * 2.0 != prev_deltat)
     {
       // Increase the time step
@@ -568,9 +573,11 @@ void
 Heat::compute_and_print_metrics() const
 {
 
-  const double total_time = time_total.count();
+  const double total_time_local = time_total.count();
   const double n_dofs = dof_handler.n_dofs();
-  const double h_min = GridTools::minimal_cell_diameter(mesh);
+  const double h_min_local = GridTools::minimal_cell_diameter(mesh);
+  const double total_time = Utilities::MPI::max(total_time_local, MPI_COMM_WORLD);
+  const double h_min      = Utilities::MPI::min(h_min_local, MPI_COMM_WORLD);
 
   // Metric calculations
   const double r_res       = h_min / n_dofs;
