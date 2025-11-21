@@ -1,0 +1,32 @@
+# Parameter file for consistency check with golden_reference
+
+subsection Adaptivity Control
+  # Disable adaptivity to match golden_reference
+  set Enable space adaptivity = false
+  set Enable time adaptivity  = false
+end
+
+subsection Discretization
+  # Match golden_reference defaults (lab-06.cpp)
+  set Degree             = 1
+  set Global refinements = 3     # Match golden_reference input
+  set Final time         = 2.0   # Match golden_reference hardcoded T=2.0
+  set Initial deltat     = 0.05  # Match golden_reference input
+  set Theta              = 0.5
+end
+
+subsection Space Adaptivity
+  # These are ignored when adaptivity is disabled
+  set Refinement interval = 5
+  set Refinement fraction = 0.1
+  set Coarsening fraction = 0.9
+end
+
+subsection Time Adaptivity
+  # These are ignored when adaptivity is disabled
+  set Adaptivity interval = 1
+  set Error lower bound   = 0.0005
+  set Error upper bound   = 0.002
+  set Min deltat          = 1e-4
+  set Max deltat          = 0.2
+end
