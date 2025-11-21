@@ -210,8 +210,10 @@ protected:
                              const TrilinosWrappers::MPI::Vector &prev_solution_owned,
                              double trial_deltat);
 
-  // Update the time step based on the error estimation
-  void update_deltat(double time, TrilinosWrappers::MPI::Vector &prev_solution_owned);
+  // Adapt the time step based on error 
+  bool adapt_time_step(const double &current_time, 
+                       const TrilinosWrappers::MPI::Vector &solution_at_tn,
+                       double &next_deltat);
 
   // Output.
   void

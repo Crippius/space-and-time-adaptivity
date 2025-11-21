@@ -5,7 +5,7 @@
 # -----------------------------------------------
 subsection Adaptivity Control
   set Enable space adaptivity = true
-  set Enable time adaptivity = false
+  set Enable time adaptivity = true
 end
 
 

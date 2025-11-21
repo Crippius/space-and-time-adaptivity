@@ -1,5 +1,6 @@
 #include "Heat.hpp"
 #include <chrono>
+#include <iomanip>
 
 
 // ParameterHandler declaration.
@@ -148,7 +149,7 @@ Heat::setup()
     dof_handler.reinit(mesh);
     dof_handler.distribute_dofs(*fe);
     locally_owned_dofs = dof_handler.locally_owned_dofs();
-    locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
+    DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
     pcout << "  Number of DoFs = " << dof_handler.n_dofs() << std::endl;
   }
 
@@ -224,8 +225,8 @@ Heat::assemble_matrices()
               for (unsigned int j = 0; j < dofs_per_cell; ++j)
                 {
                   cell_mass_matrix(i, j) += fe_values.shape_value(i, q) *
-                                            fe_values.shape_value(j, q) /
-                                            deltat * fe_values.JxW(q);
+                                            fe_values.shape_value(j, q) *
+                                            fe_values.JxW(q);
 
                   cell_stiffness_matrix(i, j) +=
                     mu_loc * fe_values.shape_grad(i, q) *
@@ -246,12 +247,16 @@ Heat::assemble_matrices()
 
   // We build the matrix on the left-hand side of the algebraic problem (the one
   // that we'll invert at each timestep).
+  // LHS = M/deltat + theta*K
   lhs_matrix.copy_from(mass_matrix);
+  lhs_matrix *= (1.0 / deltat);
   lhs_matrix.add(theta, stiffness_matrix);
 
   // We build the matrix on the right-hand side (the one that multiplies the old
   // solution un).
+  // RHS = M/deltat - (1-theta)*K
   rhs_matrix.copy_from(mass_matrix);
+  rhs_matrix *= (1.0 / deltat);
   rhs_matrix.add(-(1.0 - theta), stiffness_matrix);
 }
 
@@ -376,7 +381,7 @@ Heat::refine_grid()
   // Redistribute DoFs and rebuild LA objects
   dof_handler.distribute_dofs(*fe);
   locally_owned_dofs    = dof_handler.locally_owned_dofs();
-  locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
+  DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
   pcout << "  Number of DoFs after refinement = " << dof_handler.n_dofs() << std::endl;
 
   // Constraints
@@ -413,14 +418,27 @@ Heat::refine_grid()
 
 double Heat::estimate_time_error(const double &time, const TrilinosWrappers::MPI::Vector &prev_solution_owned, double trial_deltat)
 {
+  // Save current state
   TrilinosWrappers::MPI::Vector backup_solution = solution_owned;
   double backup_deltat = deltat;
   double eps = 1e-8;
   
+  // Temporarily store old matrices to avoid full reassembly
+  TrilinosWrappers::SparseMatrix backup_lhs, backup_rhs;
+  backup_lhs.copy_from(lhs_matrix);
+  backup_rhs.copy_from(rhs_matrix);
+  
   // Big Step Solution
   deltat = trial_deltat;
-  // Reassemble matrices since they depend on deltat
-  assemble_matrices();
+  // Update the time-dependent matrices
+  lhs_matrix.copy_from(mass_matrix);
+  lhs_matrix *= (1.0 / deltat);
+  lhs_matrix.add(theta, stiffness_matrix);
+  
+  rhs_matrix.copy_from(mass_matrix);
+  rhs_matrix *= (1.0 / deltat);
+  rhs_matrix.add(-(1.0 - theta), stiffness_matrix);
+  
   solution_owned = prev_solution_owned;
   solution = solution_owned;
   assemble_rhs(time + trial_deltat);
@@ -429,70 +447,95 @@ double Heat::estimate_time_error(const double &time, const TrilinosWrappers::MPI
 
   // Two Half Steps Solution
   deltat = trial_deltat / 2.0;
-  // Reassemble matrices for half-step deltat
-  assemble_matrices();
+  lhs_matrix.copy_from(mass_matrix);
+  lhs_matrix *= (1.0 / deltat);
+  lhs_matrix.add(theta, stiffness_matrix);
+  
+  rhs_matrix.copy_from(mass_matrix);
+  rhs_matrix *= (1.0 / deltat);
+  rhs_matrix.add(-(1.0 - theta), stiffness_matrix);
+  
   solution_owned = prev_solution_owned;
   solution = solution_owned;
   assemble_rhs(time + deltat);
   solve_time_step();
-  TrilinosWrappers::MPI::Vector sol_half_step = solution_owned;
   assemble_rhs(time + 2.0 * deltat);
   solve_time_step();
   TrilinosWrappers::MPI::Vector sol_two_half_steps = solution_owned;
 
-  // Compute the error estimate (use global reductions)
+  // Compute the error estimate (Richardson extrapolation)
   sol_big_step -= sol_two_half_steps;
   const double num = sol_big_step.l2_norm();
   const double den = sol_two_half_steps.l2_norm() + eps;
   double error = num / den;
-  // Synchronize error across ranks to make identical decision
+  // Synchronize error across ranks
   error = Utilities::MPI::max(error, MPI_COMM_WORLD);
 
+  // Restore original state
   solution_owned = backup_solution;
   solution = solution_owned;
   deltat = backup_deltat;
-  // Restore matrices for original deltat
-  assemble_matrices();
+  lhs_matrix.copy_from(backup_lhs);
+  rhs_matrix.copy_from(backup_rhs);
 
   return error;
 }
 
-void Heat::update_deltat(double time, TrilinosWrappers::MPI::Vector &prev_solution_owned) {
-  bool step_accepted = false;
-  double trial_deltat = deltat;
-  double local_time = time;
-  double prev_deltat = 0;
-
-  prev_solution_owned = solution_owned;
-
-  while (!step_accepted)
+bool Heat::adapt_time_step(const double &current_time, 
+                           const TrilinosWrappers::MPI::Vector &solution_at_tn,
+                           double &next_deltat)
+{
+  // Estimate error of the current step that was just computed
+  double time_error = estimate_time_error(current_time - deltat, solution_at_tn, deltat);
+  time_error = Utilities::MPI::max(time_error, MPI_COMM_WORLD);
+  
+  pcout << "    [Time adaptivity] Estimated error: " << time_error;
+  
+  // If error is too large, reject the step
+  if (time_error > time_error_upper_bound)
   {
-    double time_error = estimate_time_error(local_time, prev_solution_owned, trial_deltat);
-    time_error = Utilities::MPI::max(time_error, MPI_COMM_WORLD);
-    if (time_error < time_error_lower_bound && trial_deltat * 2.0 <= max_deltat && trial_deltat * 2.0 != prev_deltat)
+    double new_deltat = deltat / 2.0;
+    if (new_deltat < min_deltat)
     {
-      // Increase the time step
-      prev_deltat = trial_deltat;
-      trial_deltat *= 2.0;
-      pcout << "[Time adaptivity] Time error " << time_error << " < lower bound. Increasing deltat to " << trial_deltat << std::endl;
-    }
-    else if (time_error > time_error_upper_bound && trial_deltat / 2.0 >= min_deltat && trial_deltat / 2.0 != prev_deltat)
-    {
-      // Decrease the time step
-      prev_deltat = trial_deltat;
-      trial_deltat /= 2.0;
-      pcout << "[Time adaptivity] Time error " << time_error << " > upper bound. Decreasing deltat to " << trial_deltat << std::endl;
+      pcout << " > upper bound, but deltat already at minimum. Accepting step." << std::endl;
+      // Can't reduce further, accept the step but don't increase deltat
+      next_deltat = deltat;
+      return true; 
     }
     else
     {
-      // Accept the time step
-      deltat = trial_deltat;
-      step_accepted = true;
-      pcout << "[Time adaptivity] Time error " << time_error << " -> reasonable. Not changing anything" << std::endl;
-      // Reassemble matrices to reflect the accepted deltat
-      assemble_matrices();
+      pcout << " > upper bound. REJECTING step, reducing deltat: " 
+            << deltat << " -> " << new_deltat << std::endl;
+      next_deltat = new_deltat;
+      return false; // Reject
     }
   }
+  
+  // Step is acceptable, decide on next deltat
+  if (time_error < time_error_lower_bound)
+  {
+    // Error is small, try to increase deltat for next step
+    double new_deltat = std::min(deltat * 2.0, max_deltat);
+    if (new_deltat > deltat)
+    {
+      pcout << " < lower bound. Accepting step, increasing deltat: " 
+            << deltat << " -> " << new_deltat << std::endl;
+      next_deltat = new_deltat;
+    }
+    else
+    {
+      pcout << " < lower bound, but deltat at maximum. Accepting step." << std::endl;
+      next_deltat = deltat;
+    }
+  }
+  else
+  {
+    // Error is in acceptable range
+    pcout << " in acceptable range. Accepting step, keeping deltat = " << deltat << std::endl;
+    next_deltat = deltat;
+  }
+  
+  return true;
 }
 
 void
@@ -525,11 +568,13 @@ Heat::solve()
   
   unsigned int time_step = 0;
   double time = 0;
+  double next_deltat = deltat; // For adaptive time stepping
 
   while (time < T)
   {
-    ++n_time_steps;
-    if (enable_space_adaptivity && time_step > 0 && time_step % refinement_interval == 0){ // Space adaptivity
+    // Apply space adaptivity before taking the step
+    if (enable_space_adaptivity && time_step > 0 && time_step % refinement_interval == 0)
+    {
       auto tr0 = std::chrono::high_resolution_clock::now();
       refine_grid();
       auto tr1 = std::chrono::high_resolution_clock::now();
@@ -537,19 +582,33 @@ Heat::solve()
       n_refinements++;
       ++num_assemblies;
     }
-      
-    if (enable_time_adaptivity && time_step > 0 && time_step % time_adapt_interval == 0) // Time adaptivity
-      update_deltat(time, solution_owned);
     
-    time += deltat;
-    if (time > T) {
-        deltat -= (time - T);
-        time = T;
+    // Adjust deltat to not overshoot final time
+    if (time + deltat > T)
+    {
+      deltat = T - time;
+      // Reassemble matrices with adjusted deltat
+      lhs_matrix.copy_from(mass_matrix);
+      lhs_matrix *= (1.0 / deltat);
+      lhs_matrix.add(theta, stiffness_matrix);
+      rhs_matrix.copy_from(mass_matrix);
+      rhs_matrix *= (1.0 / deltat);
+      rhs_matrix.add(-(1.0 - theta), stiffness_matrix);
     }
 
     ++time_step;
-    pcout << "n = " << std::setw(3) << time_step << ", t = " << std::setw(5) << time << ", deltat = " << deltat << ":" << std::flush;
+    ++n_time_steps;
+    
+    // Save solution before taking the step (needed for time adaptivity)
+    TrilinosWrappers::MPI::Vector solution_before_step = solution_owned;
+    double time_before_step = time;
+    
+    pcout << "n = " << std::setw(3) << time_step << ", t = " << std::setw(5) << std::setprecision(4) << time 
+          << " -> " << time + deltat << ", deltat = " << deltat << ":" << std::flush;
 
+    // Take the time step
+    time += deltat;
+    
     t0 = std::chrono::high_resolution_clock::now();
     assemble_rhs(time);
     t1 = std::chrono::high_resolution_clock::now();
@@ -559,6 +618,47 @@ Heat::solve()
     solve_time_step();
     t1 = std::chrono::high_resolution_clock::now();
     time_solve_step += t1 - t0;
+    
+    pcout << std::endl;
+
+    // Apply time adaptivity after computing the solution
+    bool step_accepted = true;
+    if (enable_time_adaptivity && time_step % time_adapt_interval == 0)
+    {
+      step_accepted = adapt_time_step(time, solution_before_step, next_deltat);
+      
+      if (!step_accepted)
+      {
+        // Reject the step
+        pcout << "    Step REJECTED - redoing with smaller deltat" << std::endl;
+        solution_owned = solution_before_step;
+        solution = solution_owned;
+        time = time_before_step;
+        --time_step; // Don't count rejected step
+        --n_time_steps;
+        
+        deltat = next_deltat;
+        // Reassemble matrices with new deltat
+        lhs_matrix.copy_from(mass_matrix);
+        lhs_matrix *= (1.0 / deltat);
+        lhs_matrix.add(theta, stiffness_matrix);
+        rhs_matrix.copy_from(mass_matrix);
+        rhs_matrix *= (1.0 / deltat);
+        rhs_matrix.add(-(1.0 - theta), stiffness_matrix);
+      }
+      else if (next_deltat != deltat)
+      {
+        // Step accepted, but deltat changed for next step
+        deltat = next_deltat;
+        // Reassemble matrices with new deltat
+        lhs_matrix.copy_from(mass_matrix);
+        lhs_matrix *= (1.0 / deltat);
+        lhs_matrix.add(theta, stiffness_matrix);
+        rhs_matrix.copy_from(mass_matrix);
+        rhs_matrix *= (1.0 / deltat);
+        rhs_matrix.add(-(1.0 - theta), stiffness_matrix);
+      }
+    }
 
   }
   output(9999);

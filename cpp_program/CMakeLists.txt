@@ -28,7 +28,7 @@ message(STATUS)
 include_directories(${Boost_INCLUDE_DIRS})
 
 # Locate deal.II and initialize its variables.
-find_package(deal.II 9.5.1 REQUIRED
+find_package(deal.II 9.0 REQUIRED
   HINTS ${DEAL_II_DIR} $ENV{DEAL_II_DIR} $ENV{mkDealiiPrefix})
 deal_ii_initialize_cached_variables()
 
