@@ -1,4 +1,5 @@
 #include "Heat.hpp"
+#include "Heat.hpp"
 #include <chrono>
 #include <iomanip>
 
@@ -87,14 +88,13 @@ Heat::parse_parameters(ParameterHandler &prm)
 }
 
 
-Heat::Heat(ParameterHandler &prm)
-  : forcing_term(0.0) // Temp declaration, will be updated later
+Heat::Heat(ParameterHandler &prm):
+exact_solution(3),
+forcing_term(exact_solution,1.0) // Temp declaration, will be updated later
 {
   // Read the parameters from the ParameterHandler
   parse_parameters(prm);
-  
-  // Update forcing term with the final time
-  const_cast<double&>(forcing_term.T) = T;
+
 }
 
 
@@ -313,7 +313,7 @@ Heat::assemble_rhs(const double &time)
 void
 Heat::solve_time_step()
 {
-  SolverControl solver_control(1000, 1e-6 * system_rhs.l2_norm());
+  SolverControl solver_control(1000, 1e-7 * system_rhs.l2_norm());
 
   SolverCG<TrilinosWrappers::MPI::Vector> solver(solver_control);
   TrilinosWrappers::PreconditionSSOR      preconditioner;
@@ -665,8 +665,79 @@ Heat::solve()
   auto t_total_end = std::chrono::high_resolution_clock::now();
   time_total = t_total_end - t_total_start;
 
+  // 1. SYNCHRONIZE TIME
+  // Ensure the exact solution matches the final simulation time.
+
+  // 2. PREPARE ERROR VECTOR
+  // This vector holds the error norm squared for *each* cell.
+  Vector<float> difference_per_cell(mesh.n_active_cells());
+
+  // 3. INTEGRATE DIFFERENCE
+  // We use a higher order quadrature (degree + 2) because the exact solution
+  // is curved (sine waves) and we want to capture it accurately.
+  exact_solution.set_time(time);
+
+  VectorTools::integrate_difference(dof_handler,
+                                    solution,
+                                    exact_solution,
+                                    difference_per_cell,
+                                    QGauss<dim>(5),
+                                    VectorTools::L2_norm);
+
+  // 4. COMPUTE GLOBAL L2 NORM
+  // Sum the cell errors and take the square root.
+  const double L2_error = VectorTools::compute_global_error(mesh,
+                                                            difference_per_cell,
+                                                            VectorTools::L2_norm);
+
+  pcout << "Final Simulation Time: " << time << std::endl;
+  pcout << "Final L2 Error       : " << L2_error << std::endl;
+
   // Compute and print performance metrics
   compute_and_print_metrics();
+
+  DataOut<dim> data_out;
+  data_out.attach_dof_handler(dof_handler);
+
+  // 2. Add the Numerical Solution (Standard)
+  // Renaming it to "numerical_solution" helps distinguish it in ParaView
+  data_out.add_data_vector(solution, "numerical_solution");
+
+  // ---------------------------------------------------------
+  // 3. Add the Exact Solution (The New Part)
+  // ---------------------------------------------------------
+
+  // a. Create a temporary vector to hold the exact values
+  Vector<double> exact_vector(dof_handler.n_dofs());
+
+
+  // c. Project/Interpolate the math formula onto the mesh nodes
+  VectorTools::interpolate(dof_handler,
+                           exact_solution,
+                           exact_vector);
+
+  // d. Add it to the output
+  data_out.add_data_vector(exact_vector, "exact_solution");
+
+  // ---------------------------------------------------------
+  // 4. Add the Point-wise Error (Bonus: Visualization of Error)
+  // ---------------------------------------------------------
+  // It is often easier to debug by seeing *where* the error is high.
+
+  Vector<double> error_vector(dof_handler.n_dofs());
+  for (unsigned int i = 0; i < solution.size(); ++i)
+  {
+    error_vector[i] = std::abs(solution[i] - exact_vector[i]);
+  }
+  data_out.add_data_vector(error_vector, "absolute_error");
+
+
+  // 5. Build and Write
+  data_out.build_patches();
+
+  const std::string filename = "solution-exact.vtu";
+  std::ofstream output(filename);
+  data_out.write_vtu(output);
 }
 
 void
@@ -695,4 +766,8 @@ Heat::compute_and_print_metrics() const
   pcout << "  - r_res (h / n_Omega):                " << r_res << std::endl;
   pcout << "  - r_t-per-DOF (t / n_Omega):          " << r_t_per_dof << " s/DOF" << std::endl;
   pcout << "===============================================" << std::endl;
+
+  pcout << "\n--- FINAL ERROR ANALYSIS ---" << std::endl;
+
+
 }

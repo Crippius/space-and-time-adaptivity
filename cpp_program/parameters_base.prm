@@ -14,7 +14,7 @@ end
 # -----------------------------------------------
 subsection Discretization
   set Degree              = 1
-  set Global refinements  = 3  
+  set Global refinements  = 3
   set Final time          = 2.0
   set Initial deltat      = 0.05
   set Theta               = 0.5
