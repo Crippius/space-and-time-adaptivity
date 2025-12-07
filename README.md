@@ -14,6 +14,7 @@ This project explores **adaptive methods** in both **space and time** for solvin
 * [Leonardo Arnaboldi](https://github.com/leo-arnaboldi)
 * [Luca Donato](https://github.com/lucacris72)
 * [Tommaso Crippa](https://github.com/crippius)
+* [Felipe Epia](https://github.com/fffeelipe)
 
 
 **Professor**: *Alfio Maria Quarteroni*
