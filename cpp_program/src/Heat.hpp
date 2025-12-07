@@ -365,6 +365,7 @@ private:
   std::chrono::duration<double> time_assemble_rhs{0.0};
   std::chrono::duration<double> time_solve_step{0.0};
   unsigned int n_time_steps{0};
+  unsigned int max_n_dofs{0}; // Track maximum DOFs during simulation
 
 };
 

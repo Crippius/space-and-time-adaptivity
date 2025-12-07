@@ -97,7 +97,7 @@ def parse_metrics_from_log(log_path):
     metrics = {}
     patterns = {
         "total_time": r"Total Wall-clock time \(t\):\s+([\d\.\-eE]+)",
-        "n_dofs": r"Final Degrees of Freedom \(n_Omega\):\s+([\d\.\-eE]+)",
+        "n_dofs": r"Maximum Degrees of Freedom \(n_Omega\):\s+([\d\.\-eE]+)",
         "h_min": r"Minimum cell diameter \(h\):\s+([\d\.\-eE]+)",
         "r_res": r"r_res \(h / n_Omega\):\s+([\d\.\-eE]+)",
         "r_t_per_dof": r"r_t-per-DOF \(t / n_Omega\):\s+([\d\.\-eE]+)",
