@@ -69,6 +69,7 @@ struct SpectralDim {
     std::vector<double> wavenumbers; // For space: n*pi, For time: omega
 };
 
+template <int dim>
 class SpectralSumSolution : public Function<dim>
 {
 public:
@@ -76,11 +77,10 @@ public:
     std::vector<SpectralDim> space_dims;
     SpectralDim time_dim;
 
-    SpectralSumSolution(unsigned int n_modes)
-    : Function<dim>(1)
+    SpectralSumSolution(unsigned int n_modes, unsigned int seed = 42)
+        : Function<dim>(1)
     {
-
-        std::mt19937 rng(42);
+        std::mt19937 rng(seed);
         std::uniform_real_distribution<double> dist_amp(-1.0, 1.0);
 
         // --- 1. SETUP SPATIAL MODES (X, Y, Z) ---
@@ -133,20 +133,17 @@ public:
 
         return spatial_part * time_part;
     }
-
 };
 
-  // Function for the forcing term (9 sources, relay activation in groups).
-  class ForcingTerm : public Function<dim>
-  {
-  public:
-    const SpectralSumSolution& exact_solution;
+template <int dim>
+class SpectralSumForcing : public Function<dim>
+{
+    const SpectralSumSolution<dim>& exact_solution;
     double alpha;
-    // Constructor
-      ForcingTerm(const SpectralSumSolution& exact, double alpha_val)
-      : Function<dim>(1), exact_solution(exact), alpha(alpha_val) {}
 
-    // Forcing term: f(x,t) = (∑ₖ Aₖ sin(2π νₖ t + φₖ)) * (∑ᵢ exp(-||x-xᵢ||²/σ_spatial²))
+public:
+    SpectralSumForcing(const SpectralSumSolution<dim>& exact, double alpha_val)
+        : Function<dim>(1), exact_solution(exact), alpha(alpha_val) {}
 
     // Helper: evaluate Sum( a * sin(k*val) )
     double eval_func(double val, const SpectralDim& s) const {
@@ -178,8 +175,8 @@ public:
 
     virtual double value(const Point<dim> &p, const unsigned int = 0) const override
     {
-
         double t = this->get_time();
+
         // 1. Precompute parts for X, Y, Z
         //    We need Function (F) and 2nd Derivative (F'') for each dimension
         double X  = eval_func(p[0], exact_solution.space_dims[0]);
@@ -207,15 +204,14 @@ public:
         // Laplacian Term: laplace(u) = (X'' Y Z + X Y'' Z + X Y Z'') * T
         double laplace_u = (X_xx * Y * Z) + (X * Y_yy * Z);
         if(dim == 3) {
-            laplace_u += (X * Y * Z_zz);
+             laplace_u += (X * Y * Z_zz);
         }
         laplace_u *= T;
 
         // Final Source: f = u_t - alpha * laplace(u)
         return u_t - (alpha * laplace_u);
     }
-
-  };
+};
 
   // Function for the initial condition.
   class FunctionU0 : public Function<dim>
@@ -286,14 +282,24 @@ protected:
 
   // Output.
   void
-  output(const unsigned int &time_step) const;
+  output(const unsigned int &time_step, const double &time);
+
+private:
+  // Helper functions to extract parameters for the constructor
+  static unsigned int
+  get_n_modes_from_prm(ParameterHandler &prm);
+  static unsigned int
+  get_random_seed_from_prm(ParameterHandler &prm);
 
   // Problem definition. ///////////////////////////////////////////////////////
 
-  FunctionMu mu;
-    SpectralSumSolution exact_solution;
-    ForcingTerm forcing_term;
+  // Spectral Solution Parameters must be declared before exact_solution
+  unsigned int n_modes;
+  unsigned int random_seed;
 
+  FunctionMu mu;
+  SpectralSumSolution<dim> exact_solution;
+  SpectralSumForcing<dim> forcing_term;
   FunctionU0 u_0;
   
   // Discretization. ///////////////////////////////////////////////////////////
@@ -301,6 +307,7 @@ protected:
   double       T;
   double       deltat;
   double       theta;
+  unsigned int output_interval;
 
   // MPI parallel metadata.
   const unsigned int mpi_size = Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD);

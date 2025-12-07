@@ -1,5 +1,4 @@
 #include "Heat.hpp"
-#include "Heat.hpp"
 #include <chrono>
 #include <iomanip>
 
@@ -25,6 +24,14 @@ Heat::declare_parameters(ParameterHandler &prm)
     prm.declare_entry("Final time", "2.0", Patterns::Double(0.0), "Final time T");
     prm.declare_entry("Initial deltat", "0.05", Patterns::Double(0.0), "Initial time step size");
     prm.declare_entry("Theta", "0.5", Patterns::Double(0.0, 1.0), "Theta for the time-stepping scheme");
+    prm.declare_entry("Output interval", "1", Patterns::Integer(1), "Steps between VTU output");
+  }
+  prm.leave_subsection();
+
+  prm.enter_subsection("Spectral Solution");
+  {
+    prm.declare_entry("Number of modes", "5", Patterns::Integer(1), "Number of modes for the spectral solution");
+    prm.declare_entry("Random seed", "42", Patterns::Integer(0), "Random seed for the spectral solution");
   }
   prm.leave_subsection();
 
@@ -65,6 +72,7 @@ Heat::parse_parameters(ParameterHandler &prm)
     T      = prm.get_double("Final time");
     deltat = prm.get_double("Initial deltat");
     theta  = prm.get_double("Theta");
+    output_interval = prm.get_integer("Output interval");
   }
   prm.leave_subsection();
 
@@ -87,14 +95,33 @@ Heat::parse_parameters(ParameterHandler &prm)
   prm.leave_subsection();
 }
 
-
-Heat::Heat(ParameterHandler &prm):
-exact_solution(3),
-forcing_term(exact_solution,1.0) // Temp declaration, will be updated later
+unsigned int
+Heat::get_n_modes_from_prm(ParameterHandler &prm)
 {
+  prm.enter_subsection("Spectral Solution");
+  const unsigned int n_modes = prm.get_integer("Number of modes");
+  prm.leave_subsection();
+  return n_modes;
+}
+
+unsigned int
+Heat::get_random_seed_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Spectral Solution");
+  const unsigned int random_seed = prm.get_integer("Random seed");
+  prm.leave_subsection();
+  return random_seed;
+}
+
+Heat::Heat(ParameterHandler &prm)
+  : n_modes(get_n_modes_from_prm(prm)),
+    random_seed(get_random_seed_from_prm(prm)),
+    exact_solution(n_modes, random_seed), 
+    forcing_term(exact_solution, 1.0)
+{
+  pcout<<"Number of modes: "<<n_modes<<std::endl;
   // Read the parameters from the ParameterHandler
   parse_parameters(prm);
-
 }
 
 
@@ -330,11 +357,21 @@ Heat::solve_time_step()
 }
 
 void
-Heat::output(const unsigned int &time_step) const
+Heat::output(const unsigned int &time_step, const double &time)
 {
   DataOut<dim> data_out;
   data_out.attach_dof_handler(dof_handler);
-  data_out.add_data_vector(solution, "u");
+  data_out.add_data_vector(solution, "numerical_solution");
+
+  exact_solution.set_time(time);
+  Vector<double> exact_vector(dof_handler.n_dofs());
+  VectorTools::interpolate(dof_handler, exact_solution, exact_vector);
+  data_out.add_data_vector(exact_vector, "exact_solution");
+
+  Vector<double> error_vector(dof_handler.n_dofs());
+  error_vector = solution_owned;
+  error_vector -= exact_vector;
+  data_out.add_data_vector(error_vector, "absolute_error");
 
   data_out.build_patches();
 
@@ -559,10 +596,11 @@ Heat::solve()
 
   {
     pcout << "Applying the initial condition" << std::endl;
-    VectorTools::interpolate(dof_handler, u_0, solution_owned);
+    exact_solution.set_time(0.0);
+    VectorTools::interpolate(dof_handler, exact_solution, solution_owned);
     constraints.distribute(solution_owned);
     solution = solution_owned;
-    output(0);
+    output(0, 0.0);
     pcout << "-----------------------------------------------" << std::endl;
   }
   
@@ -614,11 +652,29 @@ Heat::solve()
     t1 = std::chrono::high_resolution_clock::now();
     time_assemble_rhs += t1 - t0;
 
+    // Apply non-homogeneous boundary conditions from the exact solution
+    {
+        exact_solution.set_time(time);
+        std::map<types::global_dof_index, double> boundary_values;
+        VectorTools::interpolate_boundary_values(dof_handler,
+                                                 0,
+                                                 exact_solution,
+                                                 boundary_values);
+        MatrixTools::apply_boundary_values(boundary_values,
+                                           lhs_matrix,
+                                           solution_owned,
+                                           system_rhs);
+    }
+
     t0 = std::chrono::high_resolution_clock::now();
     solve_time_step();
-    t1 = std::chrono::high_resolution_clock::now();
+    t1 =
+std::chrono::high_resolution_clock::now();
     time_solve_step += t1 - t0;
     
+    if (time_step % output_interval == 0)
+      output(time_step, time);
+
     pcout << std::endl;
 
     // Apply time adaptivity after computing the solution
@@ -661,83 +717,47 @@ Heat::solve()
     }
 
   }
-  output(9999);
+  output(9999, time);
   auto t_total_end = std::chrono::high_resolution_clock::now();
   time_total = t_total_end - t_total_start;
-
-  // 1. SYNCHRONIZE TIME
-  // Ensure the exact solution matches the final simulation time.
-
-  // 2. PREPARE ERROR VECTOR
-  // This vector holds the error norm squared for *each* cell.
-  Vector<float> difference_per_cell(mesh.n_active_cells());
-
-  // 3. INTEGRATE DIFFERENCE
-  // We use a higher order quadrature (degree + 2) because the exact solution
-  // is curved (sine waves) and we want to capture it accurately.
-  exact_solution.set_time(time);
-
-  VectorTools::integrate_difference(dof_handler,
-                                    solution,
-                                    exact_solution,
-                                    difference_per_cell,
-                                    QGauss<dim>(5),
-                                    VectorTools::L2_norm);
-
-  // 4. COMPUTE GLOBAL L2 NORM
-  // Sum the cell errors and take the square root.
-  const double L2_error = VectorTools::compute_global_error(mesh,
-                                                            difference_per_cell,
-                                                            VectorTools::L2_norm);
-
-  pcout << "Final Simulation Time: " << time << std::endl;
-  pcout << "Final L2 Error       : " << L2_error << std::endl;
 
   // Compute and print performance metrics
   compute_and_print_metrics();
 
-  DataOut<dim> data_out;
-  data_out.attach_dof_handler(dof_handler);
-
-  // 2. Add the Numerical Solution (Standard)
-  // Renaming it to "numerical_solution" helps distinguish it in ParaView
-  data_out.add_data_vector(solution, "numerical_solution");
-
-  // ---------------------------------------------------------
-  // 3. Add the Exact Solution (The New Part)
-  // ---------------------------------------------------------
-
-  // a. Create a temporary vector to hold the exact values
-  Vector<double> exact_vector(dof_handler.n_dofs());
-
-
-  // c. Project/Interpolate the math formula onto the mesh nodes
-  VectorTools::interpolate(dof_handler,
-                           exact_solution,
-                           exact_vector);
-
-  // d. Add it to the output
-  data_out.add_data_vector(exact_vector, "exact_solution");
-
-  // ---------------------------------------------------------
-  // 4. Add the Point-wise Error (Bonus: Visualization of Error)
-  // ---------------------------------------------------------
-  // It is often easier to debug by seeing *where* the error is high.
-
-  Vector<double> error_vector(dof_handler.n_dofs());
-  for (unsigned int i = 0; i < solution.size(); ++i)
+  // Error computation
   {
-    error_vector[i] = std::abs(solution[i] - exact_vector[i]);
+    pcout << "\n--- FINAL ERROR ANALYSIS ---" << std::endl;
+
+    // 1. SYNCHRONIZE TIME
+    exact_solution.set_time(time);
+
+    // 2. PREPARE ERROR VECTOR
+    Vector<float> difference_per_cell(mesh.n_active_cells());
+
+    // 3. INTEGRATE DIFFERENCE
+    VectorTools::integrate_difference(dof_handler,
+                                      solution,
+                                      exact_solution,
+                                      difference_per_cell,
+                                      QGauss<dim>(r + 2),
+                                      VectorTools::L2_norm);
+
+    // 4. COMPUTE GLOBAL L2 NORM OF ERROR
+    const double L2_error = VectorTools::compute_global_error(mesh,
+                                                              difference_per_cell,
+                                                              VectorTools::L2_norm);
+
+    // 5. COMPUTE L2 NORM OF EXACT SOLUTION
+    TrilinosWrappers::MPI::Vector exact_solution_vector(solution_owned);
+    VectorTools::interpolate(dof_handler, exact_solution, exact_solution_vector);
+    const double L2_norm_exact = exact_solution_vector.l2_norm();
+
+
+    pcout << "Final Simulation Time: " << time << std::endl;
+    pcout << "Final L2 Error       : " << L2_error << std::endl;
+    pcout << "L2 Norm of Exact Sol : " << L2_norm_exact << std::endl;
+    pcout << "Relative L2 Error    : " << L2_error / L2_norm_exact << std::endl;
   }
-  data_out.add_data_vector(error_vector, "absolute_error");
-
-
-  // 5. Build and Write
-  data_out.build_patches();
-
-  const std::string filename = "solution-exact.vtu";
-  std::ofstream output(filename);
-  data_out.write_vtu(output);
 }
 
 void
@@ -766,8 +786,4 @@ Heat::compute_and_print_metrics() const
   pcout << "  - r_res (h / n_Omega):                " << r_res << std::endl;
   pcout << "  - r_t-per-DOF (t / n_Omega):          " << r_t_per_dof << " s/DOF" << std::endl;
   pcout << "===============================================" << std::endl;
-
-  pcout << "\n--- FINAL ERROR ANALYSIS ---" << std::endl;
-
-
 }

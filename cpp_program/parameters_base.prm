@@ -8,13 +8,18 @@ subsection Adaptivity Control
   set Enable time adaptivity = true
 end
 
+subsection Spectral Solution
+  set Number of modes = 2
+  set Random seed = 42
+end
+
 
 # -----------------------------------------------
 # Discretization Params
 # -----------------------------------------------
 subsection Discretization
-  set Degree              = 1
-  set Global refinements  = 3
+  set Degree              = 2
+  set Global refinements  = 4
   set Final time          = 2.0
   set Initial deltat      = 0.05
   set Theta               = 0.5
