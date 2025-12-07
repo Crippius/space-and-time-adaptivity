@@ -10,19 +10,19 @@ import time
 ### DEFINE PATHS
 
 # Path to the C++ executable
-EXECUTABLE_PATH = Path("./cpp_program/build/main").resolve()
+EXECUTABLE_PATH = Path("../cpp_program/build/main").resolve()
 
 # Path to the error computation script
 ERROR_SCRIPT_PATH = Path("./compute_error.py").resolve()
 
 # Percorso della soluzione di riferimento ("golden")
-GOLDEN_REFERENCE_PATH = Path("./golden_reference/ref_7_0.0005/solution_9999.pvtu").resolve()
+GOLDEN_REFERENCE_PATH = Path("../golden_reference/ref_7_0.0005/solution_9999.pvtu").resolve()
 
 # Main directory where all results will be saved
-RUNS_DIR = Path("./test_runs").resolve()
+RUNS_DIR = Path("../test_runs").resolve()
 
 # Base parameter file to start from
-BASE_PARAMETERS_FILE = Path("./parameters_base.prm").resolve()
+BASE_PARAMETERS_FILE = Path("../parameters_base.prm").resolve()
 
 # Output CSV file name
 RESULTS_CSV_PATH = RUNS_DIR / "results.csv"

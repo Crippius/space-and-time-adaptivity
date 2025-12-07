@@ -37,6 +37,10 @@ build/*
 
 mesh/*
 
-test_runs/*
+*/test_runs/*
+
+/scalability_results/*
+
+scripts/scalability_results/*
 
 .vscode/
