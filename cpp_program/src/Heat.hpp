@@ -41,6 +41,7 @@
 #include <vector>
 #include <cmath>
 #include <chrono>
+#include <random>
 
 using namespace dealii;
 
@@ -63,90 +64,154 @@ public:
     }
   };
 
-  // Function for the forcing term (9 sources, relay activation in groups).
-  class ForcingTerm : public Function<dim>
-  {
-  public:
-    // Constructor
-    explicit ForcingTerm(const double T_final)
-      : Function<dim>(),
-        T(T_final),
-        // Heat sources parameters
-        A{1.0, 0.5, 0.25},
-        nu{1.0, 3.0, 5.0},
-        phi{0.0, M_PI / 2.0, M_PI}
+struct SpectralDim {
+    std::vector<double> amplitudes;
+    std::vector<double> wavenumbers; // For space: n*pi, For time: omega
+};
+
+template <int dim>
+class SpectralSumSolution : public Function<dim>
+{
+public:
+    // We store coefficients for X, Y, Z (and potentially more) + Time
+    std::vector<SpectralDim> space_dims;
+    SpectralDim time_dim;
+
+    SpectralSumSolution(unsigned int n_modes, unsigned int seed = 42)
+        : Function<dim>(1)
     {
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<double> dist_amp(-1.0, 1.0);
 
-      centers = {// Group 1: Short peaks
-                 Point<dim>(0.1, 0.1, 0.1),
-                 Point<dim>(0.9, 0.1, 0.9),
-                 Point<dim>(0.5, 0.9, 0.5),
-                 // Groupo 2: Medium peaks
-                 Point<dim>(0.2, 0.8, 0.2),
-                 Point<dim>(0.8, 0.2, 0.8),
-                 Point<dim>(0.2, 0.2, 0.8),
-                 // Group 3: Wide peaks
-                 Point<dim>(0.5, 0.5, 0.5),
-                 Point<dim>(0.1, 0.9, 0.1),
-                 Point<dim>(0.9, 0.9, 0.1)};
+        // --- 1. SETUP SPATIAL MODES (X, Y, Z) ---
+        // We use prime numbers for frequencies to avoid repeating patterns
+        std::vector<double> base_freqs = {1.0, 2.0, 3.0, 5.0, 7.0, 11.0, 13.0, 17.0, 19.0, 23.0};
 
-      sigmas = {// Group 1: Short peaks
-                0.015,
-                0.020,
-                0.018,
-                // Group 2: Medium peaks
-                0.08,
-                0.07,
-                0.09,
-                // Group 3: Wide peaks
-                0.20,
-                0.22,
-                0.18};
+        space_dims.resize(dim);
+        for(unsigned int d=0; d<dim; ++d) {
+            for(unsigned int i=0; i<n_modes; ++i) {
+                // Random amplitude
+                space_dims[d].amplitudes.push_back(dist_amp(rng));
+
+                // Wavenumber k = n * pi
+                // We pick from prime list to make it "messy"
+                double n = base_freqs[i % base_freqs.size()];
+                // Add some random high-frequency noise for stress testing
+                if (i > n_modes/2) n += (dist_amp(rng) + 1.0) * 2.0;
+
+                space_dims[d].wavenumbers.push_back(n * numbers::PI);
+            }
+        }
+
+        // --- 2. SETUP TIME MODES ---
+        // Slower dynamics than space so the solver can catch up
+        for(unsigned int i=0; i<n_modes; ++i) {
+            time_dim.amplitudes.push_back(dist_amp(rng));
+            // Time frequencies: random values between 1 and 10
+            time_dim.wavenumbers.push_back(std::abs(dist_amp(rng)) * 10.0 + 1.0);
+        }
     }
 
-    // Forcing term: f(x,t) = (∑ₖ Aₖ sin(2π νₖ t + φₖ)) * (∑ᵢ exp(-||x-xᵢ||²/σ_spatial²))
-    virtual double value(const Point<dim> &p,
-                         const unsigned int /*component*/ = 0) const override
-    {
-      const double t = this->get_time();
-
-      
-      double temporal_wave = 0.0;
-      for (unsigned int k = 0; k < A.size(); ++k)
-        temporal_wave += A[k] * std::sin(2.0 * M_PI * nu[k] * t + phi[k]) + A[k];
-
-      double spatial_term = 0.0;
-
-      // Activate sources in groups based on time t
-      // 3 sources per group, total 9 sources
-      if (t < T / 3.0)
-        {
-          for (unsigned int i = 0; i < 3; ++i)
-            spatial_term += std::exp(-p.distance_square(centers[i]) /
-                                     (sigmas[i] * sigmas[i]));
+    // Helper to evaluate Sum( a * sin(k*val) )
+    double eval_1d(double val, const SpectralDim& s) const {
+        double sum = 0.0;
+        for(size_t i=0; i<s.amplitudes.size(); ++i) {
+            sum += s.amplitudes[i] * std::sin(s.wavenumbers[i] * val);
         }
-      else if (t < 2.0 * T / 3.0)
-        {
-          for (unsigned int i = 3; i < 6; ++i)
-            spatial_term += std::exp(-p.distance_square(centers[i]) /
-                                     (sigmas[i] * sigmas[i]));
-        }
-      else
-        {
-          for (unsigned int i = 6; i < 9; ++i)
-            spatial_term += std::exp(-p.distance_square(centers[i]) /
-                                     (sigmas[i] * sigmas[i]));
-        }
-
-      return temporal_wave * spatial_term;
+        return sum;
     }
 
-  public: 
-    const double            T; 
-    std::vector<double>     A, nu, phi;
-    std::vector<Point<dim>> centers;
-    std::vector<double>     sigmas;
-  };
+    virtual double value(const Point<dim> &p, const unsigned int = 0) const override
+    {
+        // u = X(x) * Y(y) * Z(z) * T(t)
+        double spatial_part = 1.0;
+        for(unsigned int d=0; d<dim; ++d) {
+            spatial_part *= eval_1d(p[d], space_dims[d]);
+        }
+
+        double time_part = eval_1d(this->get_time(), time_dim);
+
+        return spatial_part * time_part;
+    }
+};
+
+template <int dim>
+class SpectralSumForcing : public Function<dim>
+{
+    const SpectralSumSolution<dim>& exact_solution;
+    double alpha;
+
+public:
+    SpectralSumForcing(const SpectralSumSolution<dim>& exact, double alpha_val)
+        : Function<dim>(1), exact_solution(exact), alpha(alpha_val) {}
+
+    // Helper: evaluate Sum( a * sin(k*val) )
+    double eval_func(double val, const SpectralDim& s) const {
+        double sum = 0.0;
+        for(size_t i=0; i<s.amplitudes.size(); ++i) {
+            sum += s.amplitudes[i] * std::sin(s.wavenumbers[i] * val);
+        }
+        return sum;
+    }
+
+    // Helper: evaluate derivative Sum( a * k * cos(k*val) )
+    double eval_deriv(double val, const SpectralDim& s) const {
+        double sum = 0.0;
+        for(size_t i=0; i<s.amplitudes.size(); ++i) {
+            sum += s.amplitudes[i] * s.wavenumbers[i] * std::cos(s.wavenumbers[i] * val);
+        }
+        return sum;
+    }
+
+    // Helper: evaluate 2nd derivative Sum( -a * k^2 * sin(k*val) )
+    double eval_2nd_deriv(double val, const SpectralDim& s) const {
+        double sum = 0.0;
+        for(size_t i=0; i<s.amplitudes.size(); ++i) {
+            double k = s.wavenumbers[i];
+            sum += -s.amplitudes[i] * k * k * std::sin(k * val);
+        }
+        return sum;
+    }
+
+    virtual double value(const Point<dim> &p, const unsigned int = 0) const override
+    {
+        double t = this->get_time();
+
+        // 1. Precompute parts for X, Y, Z
+        //    We need Function (F) and 2nd Derivative (F'') for each dimension
+        double X  = eval_func(p[0], exact_solution.space_dims[0]);
+        double X_xx = eval_2nd_deriv(p[0], exact_solution.space_dims[0]);
+
+        double Y  = eval_func(p[1], exact_solution.space_dims[1]);
+        double Y_yy = eval_2nd_deriv(p[1], exact_solution.space_dims[1]);
+
+        double Z = 1.0, Z_zz = 0.0;
+        if(dim == 3) {
+            Z  = eval_func(p[2], exact_solution.space_dims[2]);
+            Z_zz = eval_2nd_deriv(p[2], exact_solution.space_dims[2]);
+        }
+
+        // 2. Precompute Time parts
+        double T  = eval_func(t, exact_solution.time_dim);
+        double T_t = eval_deriv(t, exact_solution.time_dim);
+
+        // 3. Assemble components
+        // u = X * Y * Z * T
+
+        // Time Derivative Term: u_t = (X Y Z) * T'
+        double u_t = (X * Y * Z) * T_t;
+
+        // Laplacian Term: laplace(u) = (X'' Y Z + X Y'' Z + X Y Z'') * T
+        double laplace_u = (X_xx * Y * Z) + (X * Y_yy * Z);
+        if(dim == 3) {
+             laplace_u += (X * Y * Z_zz);
+        }
+        laplace_u *= T;
+
+        // Final Source: f = u_t - alpha * laplace(u)
+        return u_t - (alpha * laplace_u);
+    }
+};
 
   // Function for the initial condition.
   class FunctionU0 : public Function<dim>
@@ -217,12 +282,24 @@ protected:
 
   // Output.
   void
-  output(const unsigned int &time_step) const;
+  output(const unsigned int &time_step, const double &time);
+
+private:
+  // Helper functions to extract parameters for the constructor
+  static unsigned int
+  get_n_modes_from_prm(ParameterHandler &prm);
+  static unsigned int
+  get_random_seed_from_prm(ParameterHandler &prm);
 
   // Problem definition. ///////////////////////////////////////////////////////
 
+  // Spectral Solution Parameters must be declared before exact_solution
+  unsigned int n_modes;
+  unsigned int random_seed;
+
   FunctionMu mu;
-  ForcingTerm forcing_term;
+  SpectralSumSolution<dim> exact_solution;
+  SpectralSumForcing<dim> forcing_term;
   FunctionU0 u_0;
   
   // Discretization. ///////////////////////////////////////////////////////////
@@ -230,6 +307,7 @@ protected:
   double       T;
   double       deltat;
   double       theta;
+  unsigned int output_interval;
 
   // MPI parallel metadata.
   const unsigned int mpi_size = Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD);
