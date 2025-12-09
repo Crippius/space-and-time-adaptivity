@@ -10,19 +10,19 @@ import time
 ### DEFINE PATHS
 
 # Path to the C++ executable
-EXECUTABLE_PATH = Path("./cpp_program/build/main").resolve()
+EXECUTABLE_PATH = Path("../cpp_program/build/main").resolve()
 
 # Path to the error computation script
 ERROR_SCRIPT_PATH = Path("./compute_error.py").resolve()
 
 # Percorso della soluzione di riferimento ("golden")
-GOLDEN_REFERENCE_PATH = Path("./golden_reference/ref_7_0.0005/solution_9999.pvtu").resolve()
+GOLDEN_REFERENCE_PATH = Path("../golden_reference/ref_7_0.0005/solution_9999.pvtu").resolve()
 
 # Main directory where all results will be saved
-RUNS_DIR = Path("./test_runs").resolve()
+RUNS_DIR = Path("../test_runs").resolve()
 
 # Base parameter file to start from
-BASE_PARAMETERS_FILE = Path("./parameters_base.prm").resolve()
+BASE_PARAMETERS_FILE = Path("../parameters_base.prm").resolve()
 
 # Output CSV file name
 RESULTS_CSV_PATH = RUNS_DIR / "results.csv"
@@ -97,7 +97,7 @@ def parse_metrics_from_log(log_path):
     metrics = {}
     patterns = {
         "total_time": r"Total Wall-clock time \(t\):\s+([\d\.\-eE]+)",
-        "n_dofs": r"Final Degrees of Freedom \(n_Omega\):\s+([\d\.\-eE]+)",
+        "n_dofs": r"Maximum Degrees of Freedom \(n_Omega\):\s+([\d\.\-eE]+)",
         "h_min": r"Minimum cell diameter \(h\):\s+([\d\.\-eE]+)",
         "r_res": r"r_res \(h / n_Omega\):\s+([\d\.\-eE]+)",
         "r_t_per_dof": r"r_t-per-DOF \(t / n_Omega\):\s+([\d\.\-eE]+)",

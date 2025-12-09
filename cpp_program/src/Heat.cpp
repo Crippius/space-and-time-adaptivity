@@ -178,6 +178,7 @@ Heat::setup()
     locally_owned_dofs = dof_handler.locally_owned_dofs();
     DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
     pcout << "  Number of DoFs = " << dof_handler.n_dofs() << std::endl;
+    max_n_dofs = dof_handler.n_dofs();
   }
 
   pcout << "-----------------------------------------------" << std::endl;
@@ -423,7 +424,9 @@ Heat::refine_grid()
   dof_handler.distribute_dofs(*fe);
   locally_owned_dofs    = dof_handler.locally_owned_dofs();
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
-  pcout << "  Number of DoFs after refinement = " << dof_handler.n_dofs() << std::endl;
+  unsigned int current_n_dofs = dof_handler.n_dofs();
+  pcout << "  Number of DoFs after refinement = " << current_n_dofs << std::endl;
+  max_n_dofs = std::max(max_n_dofs, current_n_dofs);
 
   // Constraints
   constraints.clear();
@@ -769,7 +772,7 @@ Heat::compute_and_print_metrics() const
 {
 
   const double total_time_local = time_total.count();
-  const double n_dofs = dof_handler.n_dofs();
+  const double n_dofs = static_cast<double>(max_n_dofs);
   const double h_min_local = GridTools::minimal_cell_diameter(mesh);
   const double total_time = Utilities::MPI::max(total_time_local, MPI_COMM_WORLD);
   const double h_min      = Utilities::MPI::min(h_min_local, MPI_COMM_WORLD);
@@ -783,7 +786,7 @@ Heat::compute_and_print_metrics() const
   pcout << "=== Performance Metrics Summary ===" << std::endl;
   pcout << "-----------------------------------------------" << std::endl;
   pcout << "Total Wall-clock time (t):              " << total_time << " s" << std::endl;
-  pcout << "Final Degrees of Freedom (n_Omega):     " << n_dofs << std::endl;
+  pcout << "Maximum Degrees of Freedom (n_Omega):   " << n_dofs << std::endl;
   pcout << "Minimum cell diameter (h):              " << h_min << std::endl;
   pcout << "-----------------------------------------------" << std::endl;
   pcout << "Resolution & Resource Metrics:" << std::endl;
