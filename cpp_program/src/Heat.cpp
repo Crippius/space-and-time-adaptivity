@@ -340,12 +340,16 @@ Heat::assemble_rhs(const double &time)
 void
 Heat::solve_time_step()
 {
-  SolverControl solver_control(1000, 1e-7 * system_rhs.l2_norm());
+  SolverControl solver_control(1000, 1e-5 * system_rhs.l2_norm());
 
   SolverCG<TrilinosWrappers::MPI::Vector> solver(solver_control);
-  TrilinosWrappers::PreconditionSSOR      preconditioner;
-  preconditioner.initialize(
-    lhs_matrix, TrilinosWrappers::PreconditionSSOR::AdditionalData(1.0));
+
+  TrilinosWrappers::PreconditionAMG preconditioner;
+
+  // Configure the preconditioner (many options are available)
+  TrilinosWrappers::PreconditionAMG::AdditionalData data; //todo: check for better settings
+
+  preconditioner.initialize(lhs_matrix, data);
 
   solver.solve(lhs_matrix, solution_owned, system_rhs, preconditioner);
   // Enforce hanging-node constraints on the solution
