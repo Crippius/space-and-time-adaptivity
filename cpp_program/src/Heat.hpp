@@ -64,154 +64,109 @@ public:
     }
   };
 
-struct SpectralDim {
-    std::vector<double> amplitudes;
-    std::vector<double> wavenumbers; // For space: n*pi, For time: omega
-};
+  // Exact Solution: u(x,t) = T(t) * S(x)
+  // T(t) = sum( A_k * sin(2*pi*nu_k*t + phi_k) )
+  // S(x) = sum( exp( -|x-c_i|^2 / sigma_i^2 ) )
+  template <int dim>
+  class PulsatingGaussianSolution : public Function<dim>
+  {
+  public:
+    std::vector<Point<dim>> centers;
+    std::vector<double> sigmas;
+    std::vector<double> A, nu, phi; // Temporal parameters
 
-template <int dim>
-class SpectralSumSolution : public Function<dim>
-{
-public:
-    // We store coefficients for X, Y, Z (and potentially more) + Time
-    std::vector<SpectralDim> space_dims;
-    SpectralDim time_dim;
-
-    SpectralSumSolution(unsigned int n_modes, unsigned int seed = 42)
-        : Function<dim>(1)
+    PulsatingGaussianSolution(unsigned int n_peaks, unsigned int seed = 42)
+      : Function<dim>(1)
     {
-        std::mt19937 rng(seed);
-        std::uniform_real_distribution<double> dist_amp(-1.0, 1.0);
+      std::mt19937 rng(seed);
+      std::uniform_real_distribution<double> dist_coord(0.2, 0.8); // Keep away from boundaries slightly
+      std::uniform_real_distribution<double> dist_sigma(0.05, 0.15);
+      
+      // Temporal parameters (fixed set of 3 modes for simplicity, or could be random)
+      A = {1.0, 0.5, 0.25};
+      nu = {1.0, 2.0, 3.0};
+      phi = {0.0, M_PI/4.0, M_PI/2.0};
 
-        // --- 1. SETUP SPATIAL MODES (X, Y, Z) ---
-        // We use prime numbers for frequencies to avoid repeating patterns
-        std::vector<double> base_freqs = {1.0, 2.0, 3.0, 5.0, 7.0, 11.0, 13.0, 17.0, 19.0, 23.0};
+      centers.resize(n_peaks);
+      sigmas.resize(n_peaks);
 
-        space_dims.resize(dim);
-        for(unsigned int d=0; d<dim; ++d) {
-            for(unsigned int i=0; i<n_modes; ++i) {
-                // Random amplitude
-                space_dims[d].amplitudes.push_back(dist_amp(rng));
-
-                // Wavenumber k = n * pi
-                // We pick from prime list to make it "messy"
-                double n = base_freqs[i % base_freqs.size()];
-                // Add some random high-frequency noise for stress testing
-                if (i > n_modes/2) n += (dist_amp(rng) + 1.0) * 2.0;
-
-                space_dims[d].wavenumbers.push_back(n * numbers::PI);
-            }
-        }
-
-        // --- 2. SETUP TIME MODES ---
-        // Slower dynamics than space so the solver can catch up
-        for(unsigned int i=0; i<n_modes; ++i) {
-            time_dim.amplitudes.push_back(dist_amp(rng));
-            // Time frequencies: random values between 1 and 10
-            time_dim.wavenumbers.push_back(std::abs(dist_amp(rng)) * 10.0 + 1.0);
-        }
+      for(unsigned int i=0; i<n_peaks; ++i) {
+        for(unsigned int d=0; d<dim; ++d)
+          centers[i][d] = dist_coord(rng);
+        sigmas[i] = dist_sigma(rng);
+      }
     }
 
-    // Helper to evaluate Sum( a * sin(k*val) )
-    double eval_1d(double val, const SpectralDim& s) const {
-        double sum = 0.0;
-        for(size_t i=0; i<s.amplitudes.size(); ++i) {
-            sum += s.amplitudes[i] * std::sin(s.wavenumbers[i] * val);
-        }
-        return sum;
+    double get_temporal_part(double t) const {
+      double val = 0.0;
+      for(size_t k=0; k<A.size(); ++k) {
+        val += A[k] * std::sin(2.0 * M_PI * nu[k] * t + phi[k]);
+      }
+      // Add a constant offset to make it interesting (e.g., mostly positive)
+      return val + 2.0; 
+    }
+
+    double get_spatial_part(const Point<dim> &p) const {
+      double val = 0.0;
+      for(size_t i=0; i<centers.size(); ++i) {
+        val += std::exp( -p.distance_square(centers[i]) / (sigmas[i]*sigmas[i]) );
+      }
+      return val;
     }
 
     virtual double value(const Point<dim> &p, const unsigned int = 0) const override
     {
-        // u = X(x) * Y(y) * Z(z) * T(t)
-        double spatial_part = 1.0;
-        for(unsigned int d=0; d<dim; ++d) {
-            spatial_part *= eval_1d(p[d], space_dims[d]);
-        }
-
-        double time_part = eval_1d(this->get_time(), time_dim);
-
-        return spatial_part * time_part;
+      return get_temporal_part(this->get_time()) * get_spatial_part(p);
     }
-};
+  };
 
-template <int dim>
-class SpectralSumForcing : public Function<dim>
-{
-    const SpectralSumSolution<dim>& exact_solution;
-    double alpha;
+  // Forcing Term: f = u_t - laplacian(u)
+  // u_t = T'(t) * S(x)
+  // laplacian(u) = T(t) * laplacian(S(x))
+  template <int dim>
+  class PulsatingGaussianForcing : public Function<dim>
+  {
+    const PulsatingGaussianSolution<dim>& exact_solution;
 
-public:
-    SpectralSumForcing(const SpectralSumSolution<dim>& exact, double alpha_val)
-        : Function<dim>(1), exact_solution(exact), alpha(alpha_val) {}
+  public:
+    PulsatingGaussianForcing(const PulsatingGaussianSolution<dim>& exact)
+      : Function<dim>(1), exact_solution(exact) {}
 
-    // Helper: evaluate Sum( a * sin(k*val) )
-    double eval_func(double val, const SpectralDim& s) const {
-        double sum = 0.0;
-        for(size_t i=0; i<s.amplitudes.size(); ++i) {
-            sum += s.amplitudes[i] * std::sin(s.wavenumbers[i] * val);
-        }
-        return sum;
+    double get_temporal_deriv(double t) const {
+      double val = 0.0;
+      for(size_t k=0; k<exact_solution.A.size(); ++k) {
+        val += exact_solution.A[k] * (2.0 * M_PI * exact_solution.nu[k]) * 
+               std::cos(2.0 * M_PI * exact_solution.nu[k] * t + exact_solution.phi[k]);
+      }
+      return val;
     }
 
-    // Helper: evaluate derivative Sum( a * k * cos(k*val) )
-    double eval_deriv(double val, const SpectralDim& s) const {
-        double sum = 0.0;
-        for(size_t i=0; i<s.amplitudes.size(); ++i) {
-            sum += s.amplitudes[i] * s.wavenumbers[i] * std::cos(s.wavenumbers[i] * val);
-        }
-        return sum;
-    }
-
-    // Helper: evaluate 2nd derivative Sum( -a * k^2 * sin(k*val) )
-    double eval_2nd_deriv(double val, const SpectralDim& s) const {
-        double sum = 0.0;
-        for(size_t i=0; i<s.amplitudes.size(); ++i) {
-            double k = s.wavenumbers[i];
-            sum += -s.amplitudes[i] * k * k * std::sin(k * val);
-        }
-        return sum;
+    double get_laplacian_spatial(const Point<dim> &p) const {
+      double val = 0.0;
+      for(size_t i=0; i<exact_solution.centers.size(); ++i) {
+        double dist_sq = p.distance_square(exact_solution.centers[i]);
+        double sigma2 = exact_solution.sigmas[i] * exact_solution.sigmas[i];
+        double sigma4 = sigma2 * sigma2;
+        double exp_val = std::exp(-dist_sq / sigma2);
+        
+        // Laplacian of exp(-r^2/s^2) is exp(...) * (4r^2/s^4 - 2*dim/s^2)
+        val += exp_val * ( (4.0 * dist_sq / sigma4) - (2.0 * dim / sigma2) );
+      }
+      return val;
     }
 
     virtual double value(const Point<dim> &p, const unsigned int = 0) const override
     {
-        double t = this->get_time();
+      double t = this->get_time();
+      double T = exact_solution.get_temporal_part(t);
+      double T_prime = get_temporal_deriv(t);
+      double S = exact_solution.get_spatial_part(p);
+      double laplacian_S = get_laplacian_spatial(p);
 
-        // 1. Precompute parts for X, Y, Z
-        //    We need Function (F) and 2nd Derivative (F'') for each dimension
-        double X  = eval_func(p[0], exact_solution.space_dims[0]);
-        double X_xx = eval_2nd_deriv(p[0], exact_solution.space_dims[0]);
-
-        double Y  = eval_func(p[1], exact_solution.space_dims[1]);
-        double Y_yy = eval_2nd_deriv(p[1], exact_solution.space_dims[1]);
-
-        double Z = 1.0, Z_zz = 0.0;
-        if(dim == 3) {
-            Z  = eval_func(p[2], exact_solution.space_dims[2]);
-            Z_zz = eval_2nd_deriv(p[2], exact_solution.space_dims[2]);
-        }
-
-        // 2. Precompute Time parts
-        double T  = eval_func(t, exact_solution.time_dim);
-        double T_t = eval_deriv(t, exact_solution.time_dim);
-
-        // 3. Assemble components
-        // u = X * Y * Z * T
-
-        // Time Derivative Term: u_t = (X Y Z) * T'
-        double u_t = (X * Y * Z) * T_t;
-
-        // Laplacian Term: laplace(u) = (X'' Y Z + X Y'' Z + X Y Z'') * T
-        double laplace_u = (X_xx * Y * Z) + (X * Y_yy * Z);
-        if(dim == 3) {
-             laplace_u += (X * Y * Z_zz);
-        }
-        laplace_u *= T;
-
-        // Final Source: f = u_t - alpha * laplace(u)
-        return u_t - (alpha * laplace_u);
+      // f = u_t - delta u = T'S - T(delta S)
+      return T_prime * S - T * laplacian_S;
     }
-};
+  };
 
   // Function for the initial condition.
   class FunctionU0 : public Function<dim>
@@ -287,19 +242,19 @@ protected:
 private:
   // Helper functions to extract parameters for the constructor
   static unsigned int
-  get_n_modes_from_prm(ParameterHandler &prm);
+  get_n_peaks_from_prm(ParameterHandler &prm);
   static unsigned int
   get_random_seed_from_prm(ParameterHandler &prm);
 
   // Problem definition. ///////////////////////////////////////////////////////
 
-  // Spectral Solution Parameters must be declared before exact_solution
-  unsigned int n_modes;
+  // Pulsating Field Parameters must be declared before exact_solution
+  unsigned int n_peaks;
   unsigned int random_seed;
 
   FunctionMu mu;
-  SpectralSumSolution<dim> exact_solution;
-  SpectralSumForcing<dim> forcing_term;
+  PulsatingGaussianSolution<dim> exact_solution;
+  PulsatingGaussianForcing<dim> forcing_term;
   FunctionU0 u_0;
   
   // Discretization. ///////////////////////////////////////////////////////////

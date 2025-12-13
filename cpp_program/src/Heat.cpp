@@ -28,10 +28,10 @@ Heat::declare_parameters(ParameterHandler &prm)
   }
   prm.leave_subsection();
 
-  prm.enter_subsection("Spectral Solution");
+  prm.enter_subsection("Pulsating Gaussian Field");
   {
-    prm.declare_entry("Number of modes", "5", Patterns::Integer(1), "Number of modes for the spectral solution");
-    prm.declare_entry("Random seed", "42", Patterns::Integer(0), "Random seed for the spectral solution");
+    prm.declare_entry("Number of peaks", "5", Patterns::Integer(1), "Number of peaks for the Gaussian field");
+    prm.declare_entry("Random seed", "42", Patterns::Integer(0), "Random seed for the Gaussian field");
   }
   prm.leave_subsection();
 
@@ -96,30 +96,29 @@ Heat::parse_parameters(ParameterHandler &prm)
 }
 
 unsigned int
-Heat::get_n_modes_from_prm(ParameterHandler &prm)
+Heat::get_n_peaks_from_prm(ParameterHandler &prm)
 {
-  prm.enter_subsection("Spectral Solution");
-  const unsigned int n_modes = prm.get_integer("Number of modes");
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const unsigned int n_peaks = prm.get_integer("Number of peaks");
   prm.leave_subsection();
-  return n_modes;
+  return n_peaks;
 }
 
 unsigned int
 Heat::get_random_seed_from_prm(ParameterHandler &prm)
 {
-  prm.enter_subsection("Spectral Solution");
+  prm.enter_subsection("Pulsating Gaussian Field");
   const unsigned int random_seed = prm.get_integer("Random seed");
   prm.leave_subsection();
   return random_seed;
 }
 
 Heat::Heat(ParameterHandler &prm)
-  : n_modes(get_n_modes_from_prm(prm)),
+  : n_peaks(get_n_peaks_from_prm(prm)),
     random_seed(get_random_seed_from_prm(prm)),
-    exact_solution(n_modes, random_seed), 
-    forcing_term(exact_solution, 1.0)
+    exact_solution(n_peaks, random_seed), 
+    forcing_term(exact_solution)
 {
-  pcout<<"Number of modes: "<<n_modes<<std::endl;
   // Read the parameters from the ParameterHandler
   parse_parameters(prm);
 }
@@ -178,7 +177,6 @@ Heat::setup()
     locally_owned_dofs = dof_handler.locally_owned_dofs();
     DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
     pcout << "  Number of DoFs = " << dof_handler.n_dofs() << std::endl;
-    max_n_dofs = dof_handler.n_dofs();
   }
 
   pcout << "-----------------------------------------------" << std::endl;
@@ -341,7 +339,7 @@ Heat::assemble_rhs(const double &time)
 void
 Heat::solve_time_step()
 {
-  SolverControl solver_control(1000, 1e-5 * system_rhs.l2_norm());
+  SolverControl solver_control(1000, 1e-7 * system_rhs.l2_norm());
 
   SolverCG<TrilinosWrappers::MPI::Vector> solver(solver_control);
 
@@ -424,9 +422,7 @@ Heat::refine_grid()
   dof_handler.distribute_dofs(*fe);
   locally_owned_dofs    = dof_handler.locally_owned_dofs();
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
-  unsigned int current_n_dofs = dof_handler.n_dofs();
-  pcout << "  Number of DoFs after refinement = " << current_n_dofs << std::endl;
-  max_n_dofs = std::max(max_n_dofs, current_n_dofs);
+  pcout << "  Number of DoFs after refinement = " << dof_handler.n_dofs() << std::endl;
 
   // Constraints
   constraints.clear();
@@ -772,7 +768,7 @@ Heat::compute_and_print_metrics() const
 {
 
   const double total_time_local = time_total.count();
-  const double n_dofs = static_cast<double>(max_n_dofs);
+  const double n_dofs = dof_handler.n_dofs();
   const double h_min_local = GridTools::minimal_cell_diameter(mesh);
   const double total_time = Utilities::MPI::max(total_time_local, MPI_COMM_WORLD);
   const double h_min      = Utilities::MPI::min(h_min_local, MPI_COMM_WORLD);

@@ -4,12 +4,12 @@
 # Adaptivity Control booleans
 # -----------------------------------------------
 subsection Adaptivity Control
-  set Enable space adaptivity = true
-  set Enable time adaptivity = true
+  set Enable space adaptivity = false
+  set Enable time adaptivity = false
 end
 
-subsection Spectral Solution
-  set Number of modes = 2
+subsection Pulsating Gaussian Field
+  set Number of peaks = 2
   set Random seed = 42
 end
 
@@ -19,7 +19,7 @@ end
 # -----------------------------------------------
 subsection Discretization
   set Degree              = 2
-  set Global refinements  = 4
+  set Global refinements  = 5
   set Final time          = 2.0
   set Initial deltat      = 0.05
   set Theta               = 0.5
