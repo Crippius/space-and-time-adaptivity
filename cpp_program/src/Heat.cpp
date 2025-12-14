@@ -30,8 +30,11 @@ Heat::declare_parameters(ParameterHandler &prm)
 
   prm.enter_subsection("Pulsating Gaussian Field");
   {
-    prm.declare_entry("Number of peaks", "5", Patterns::Integer(1), "Number of peaks for the Gaussian field");
+    prm.declare_entry("Number of spatial peaks", "5", Patterns::Integer(1), "Number of spatial peaks for the Gaussian field");
+    prm.declare_entry("Number of temporal peaks", "3", Patterns::Integer(1), "Number of temporal peaks for the Gaussian field");
     prm.declare_entry("Random seed", "42", Patterns::Integer(0), "Random seed for the Gaussian field");
+    prm.declare_entry("Delta min", "0.1", Patterns::Double(0.0), "Minimum width of temporal Gaussian pulses");
+    prm.declare_entry("Delta max", "0.3", Patterns::Double(0.0), "Maximum width of temporal Gaussian pulses");
   }
   prm.leave_subsection();
 
@@ -99,9 +102,27 @@ unsigned int
 Heat::get_n_peaks_from_prm(ParameterHandler &prm)
 {
   prm.enter_subsection("Pulsating Gaussian Field");
-  const unsigned int n_peaks = prm.get_integer("Number of peaks");
+  const unsigned int n_peaks = prm.get_integer("Number of spatial peaks");
   prm.leave_subsection();
   return n_peaks;
+}
+
+unsigned int
+Heat::get_final_time_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const unsigned int n_peaks = prm.get_integer("Number of spatial peaks");
+  prm.leave_subsection();
+  return n_peaks;
+}
+
+unsigned int
+Heat::get_n_temporal_peaks_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const unsigned int n_temporal_peaks = prm.get_integer("Number of temporal peaks");
+  prm.leave_subsection();
+  return n_temporal_peaks;
 }
 
 unsigned int
@@ -113,10 +134,31 @@ Heat::get_random_seed_from_prm(ParameterHandler &prm)
   return random_seed;
 }
 
+double
+Heat::get_delta_min_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const double delta_min = prm.get_double("Delta min");
+  prm.leave_subsection();
+  return delta_min;
+}
+
+double
+Heat::get_delta_max_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const double delta_max = prm.get_double("Delta max");
+  prm.leave_subsection();
+  return delta_max;
+}
+
 Heat::Heat(ParameterHandler &prm)
   : n_peaks(get_n_peaks_from_prm(prm)),
+    n_temporal_peaks(get_n_temporal_peaks_from_prm(prm)),
     random_seed(get_random_seed_from_prm(prm)),
-    exact_solution(n_peaks, random_seed), 
+    delta_min(get_delta_min_from_prm(prm)),
+    delta_max(get_delta_max_from_prm(prm)),
+    exact_solution(n_peaks, n_temporal_peaks, get_final_time_from_prm(prm), delta_min, delta_max, random_seed),
     forcing_term(exact_solution)
 {
   // Read the parameters from the ParameterHandler
@@ -674,9 +716,6 @@ Heat::solve()
     t1 =
 std::chrono::high_resolution_clock::now();
     time_solve_step += t1 - t0;
-    
-    if (time_step % output_interval == 0)
-      output(time_step, time);
 
     pcout << std::endl;
 
@@ -782,7 +821,7 @@ Heat::compute_and_print_metrics() const
   pcout << "=== Performance Metrics Summary ===" << std::endl;
   pcout << "-----------------------------------------------" << std::endl;
   pcout << "Total Wall-clock time (t):              " << total_time << " s" << std::endl;
-  pcout << "Maximum Degrees of Freedom (n_Omega):   " << n_dofs << std::endl;
+  pcout << "Final Degrees of Freedom (n_Omega):     " << n_dofs << std::endl;
   pcout << "Minimum cell diameter (h):              " << h_min << std::endl;
   pcout << "-----------------------------------------------" << std::endl;
   pcout << "Resolution & Resource Metrics:" << std::endl;

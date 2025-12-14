@@ -9,8 +9,11 @@ subsection Adaptivity Control
 end
 
 subsection Pulsating Gaussian Field
-  set Number of peaks = 2
+  set Number of spatial peaks = 2
+  set Number of temporal peaks = 3
   set Random seed = 42
+  set Delta min = 0.05
+  set Delta max = 0.10
 end
 
 
@@ -19,7 +22,7 @@ end
 # -----------------------------------------------
 subsection Discretization
   set Degree              = 2
-  set Global refinements  = 5
+  set Global refinements  = 4
   set Final time          = 2.0
   set Initial deltat      = 0.05
   set Theta               = 0.5

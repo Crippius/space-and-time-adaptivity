@@ -64,93 +64,126 @@ public:
     }
   };
 
-  // Exact Solution: u(x,t) = T(t) * S(x)
-  // T(t) = sum( A_k * sin(2*pi*nu_k*t + phi_k) )
-  // S(x) = sum( exp( -|x-c_i|^2 / sigma_i^2 ) )
+  // Exact Solution: u(x,t) = X(x) * T(t)
+  // X(x) = sum( a_i * exp( -|x-c_i|^2 / (2*sigma_i^2) ) )
+  // T(t) = sum( b_j * exp( -(t-tau_j)^2 / (2*delta_j^2) ) )
   template <int dim>
   class PulsatingGaussianSolution : public Function<dim>
   {
   public:
-    std::vector<Point<dim>> centers;
-    std::vector<double> sigmas;
-    std::vector<double> A, nu, phi; // Temporal parameters
+    // Spatial parameters (N_x)
+    std::vector<double> a;       // amplitudes
+    std::vector<Point<dim>> c;   // centers
+    std::vector<double> sigma;   // widths
 
-    PulsatingGaussianSolution(unsigned int n_peaks, unsigned int seed = 42)
+    // Temporal parameters (N_t)
+    std::vector<double> b;       // amplitudes
+    std::vector<double> tau;     // centers
+    std::vector<double> delta;   // widths
+
+    PulsatingGaussianSolution(unsigned int n_spatial_peaks, unsigned int n_temporal_peaks, 
+                              double
+                              T_final, double delta_min, double delta_max,
+                              unsigned int seed = 42)
       : Function<dim>(1)
     {
       std::mt19937 rng(seed);
-      std::uniform_real_distribution<double> dist_coord(0.2, 0.8); // Keep away from boundaries slightly
+      std::uniform_real_distribution<double> dist_amp(0.8, 2.5);
+      std::uniform_real_distribution<double> dist_coord(0.2, 0.8);
       std::uniform_real_distribution<double> dist_sigma(0.05, 0.15);
       
-      // Temporal parameters (fixed set of 3 modes for simplicity, or could be random)
-      A = {1.0, 0.5, 0.25};
-      nu = {1.0, 2.0, 3.0};
-      phi = {0.0, M_PI/4.0, M_PI/2.0};
-
-      centers.resize(n_peaks);
-      sigmas.resize(n_peaks);
-
-      for(unsigned int i=0; i<n_peaks; ++i) {
-        for(unsigned int d=0; d<dim; ++d)
-          centers[i][d] = dist_coord(rng);
-        sigmas[i] = dist_sigma(rng);
+      // Spatial setup
+      a.resize(n_spatial_peaks);
+      c.resize(n_spatial_peaks);
+      sigma.resize(n_spatial_peaks);
+      for(unsigned int i=0; i<n_spatial_peaks; ++i) {
+        a[i] = dist_amp(rng);
+        for(unsigned int d=0; d<dim; ++d) c[i][d] = dist_coord(rng);
+        sigma[i] = dist_sigma(rng);
       }
-    }
 
-    double get_temporal_part(double t) const {
-      double val = 0.0;
-      for(size_t k=0; k<A.size(); ++k) {
-        val += A[k] * std::sin(2.0 * M_PI * nu[k] * t + phi[k]);
+      // Temporal setup
+      b.resize(n_temporal_peaks);
+      tau.resize(n_temporal_peaks);
+      delta.resize(n_temporal_peaks);
+      
+      std::uniform_real_distribution<double> dist_time(0.1 * T_final, 0.9 * T_final);
+      std::uniform_real_distribution<double> dist_delta(delta_min, delta_max);
+
+      for(unsigned int j=0; j<n_temporal_peaks; ++j) {
+        b[j] = dist_amp(rng);
+        tau[j] = dist_time(rng); 
+        delta[j] = dist_delta(rng);
       }
-      // Add a constant offset to make it interesting (e.g., mostly positive)
-      return val + 2.0; 
+
+      // force the last peak to be at final time.
+      tau[n_temporal_peaks-1] = T_final;
     }
 
     double get_spatial_part(const Point<dim> &p) const {
       double val = 0.0;
-      for(size_t i=0; i<centers.size(); ++i) {
-        val += std::exp( -p.distance_square(centers[i]) / (sigmas[i]*sigmas[i]) );
+      for(size_t i=0; i<a.size(); ++i) {
+        double dist_sq = p.distance_square(c[i]);
+        val += a[i] * std::exp( -dist_sq / (2.0 * sigma[i] * sigma[i]) );
+      }
+      return val;
+    }
+
+    double get_temporal_part(double t) const {
+      double val = 0.0;
+      for(size_t j=0; j<b.size(); ++j) {
+        double diff = t - tau[j];
+        val += b[j] * std::exp( -(diff * diff) / (2.0 * delta[j] * delta[j]) );
       }
       return val;
     }
 
     virtual double value(const Point<dim> &p, const unsigned int = 0) const override
     {
-      return get_temporal_part(this->get_time()) * get_spatial_part(p);
+      return get_spatial_part(p) * get_temporal_part(this->get_time());
     }
   };
 
-  // Forcing Term: f = u_t - laplacian(u)
-  // u_t = T'(t) * S(x)
-  // laplacian(u) = T(t) * laplacian(S(x))
+  // Forcing Term: f = X * T' - alpha * (laplacian X) * T
   template <int dim>
   class PulsatingGaussianForcing : public Function<dim>
   {
     const PulsatingGaussianSolution<dim>& exact_solution;
+    double alpha;
 
   public:
-    PulsatingGaussianForcing(const PulsatingGaussianSolution<dim>& exact)
-      : Function<dim>(1), exact_solution(exact) {}
+    PulsatingGaussianForcing(const PulsatingGaussianSolution<dim>& exact, double alpha_val = 1.0)
+      : Function<dim>(1), exact_solution(exact), alpha(alpha_val) {}
 
     double get_temporal_deriv(double t) const {
       double val = 0.0;
-      for(size_t k=0; k<exact_solution.A.size(); ++k) {
-        val += exact_solution.A[k] * (2.0 * M_PI * exact_solution.nu[k]) * 
-               std::cos(2.0 * M_PI * exact_solution.nu[k] * t + exact_solution.phi[k]);
+      const auto& b = exact_solution.b;
+      const auto& tau = exact_solution.tau;
+      const auto& delta = exact_solution.delta;
+
+      for(size_t j=0; j<b.size(); ++j) {
+        double diff = t - tau[j];
+        double delta2 = delta[j] * delta[j];
+        // T'(t) term: - b_j * (t - tau_j) / delta_j^2 * exp(...)
+        val += - (b[j] * diff / delta2) * std::exp( -(diff * diff) / (2.0 * delta2) );
       }
       return val;
     }
 
     double get_laplacian_spatial(const Point<dim> &p) const {
       double val = 0.0;
-      for(size_t i=0; i<exact_solution.centers.size(); ++i) {
-        double dist_sq = p.distance_square(exact_solution.centers[i]);
-        double sigma2 = exact_solution.sigmas[i] * exact_solution.sigmas[i];
+      const auto& a = exact_solution.a;
+      const auto& c = exact_solution.c;
+      const auto& sigma = exact_solution.sigma;
+
+      for(size_t i=0; i<a.size(); ++i) {
+        double dist_sq = p.distance_square(c[i]);
+        double sigma2 = sigma[i] * sigma[i];
         double sigma4 = sigma2 * sigma2;
-        double exp_val = std::exp(-dist_sq / sigma2);
+        double exp_val = std::exp( -dist_sq / (2.0 * sigma2) );
         
-        // Laplacian of exp(-r^2/s^2) is exp(...) * (4r^2/s^4 - 2*dim/s^2)
-        val += exp_val * ( (4.0 * dist_sq / sigma4) - (2.0 * dim / sigma2) );
+        // Laplacian term: a_i * [ r^2 / sigma^4 - dim / sigma^2 ] * exp(...)
+        val += a[i] * ( (dist_sq / sigma4) - (static_cast<double>(dim) / sigma2) ) * exp_val;
       }
       return val;
     }
@@ -158,13 +191,13 @@ public:
     virtual double value(const Point<dim> &p, const unsigned int = 0) const override
     {
       double t = this->get_time();
+      double X = exact_solution.get_spatial_part(p);
       double T = exact_solution.get_temporal_part(t);
       double T_prime = get_temporal_deriv(t);
-      double S = exact_solution.get_spatial_part(p);
-      double laplacian_S = get_laplacian_spatial(p);
+      double laplacian_X = get_laplacian_spatial(p);
 
-      // f = u_t - delta u = T'S - T(delta S)
-      return T_prime * S - T * laplacian_S;
+      // f = X * T' - alpha * (laplacian X) * T
+      return X * T_prime - alpha * laplacian_X * T;
     }
   };
 
@@ -242,15 +275,26 @@ protected:
 private:
   // Helper functions to extract parameters for the constructor
   static unsigned int
+  get_final_time_from_prm(ParameterHandler &prm);
+  static unsigned int
   get_n_peaks_from_prm(ParameterHandler &prm);
   static unsigned int
+  get_n_temporal_peaks_from_prm(ParameterHandler &prm);
+  static unsigned int
   get_random_seed_from_prm(ParameterHandler &prm);
+  static double
+  get_delta_min_from_prm(ParameterHandler &prm);
+  static double
+  get_delta_max_from_prm(ParameterHandler &prm);
 
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Pulsating Field Parameters must be declared before exact_solution
   unsigned int n_peaks;
+  unsigned int n_temporal_peaks;
   unsigned int random_seed;
+  double delta_min;
+  double delta_max;
 
   FunctionMu mu;
   PulsatingGaussianSolution<dim> exact_solution;
@@ -320,7 +364,6 @@ private:
   std::chrono::duration<double> time_assemble_rhs{0.0};
   std::chrono::duration<double> time_solve_step{0.0};
   unsigned int n_time_steps{0};
-  unsigned int max_n_dofs{0}; // Track maximum DOFs during simulation
 
 };
 
