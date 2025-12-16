@@ -83,12 +83,12 @@ public:
 
     PulsatingGaussianSolution(unsigned int n_spatial_peaks, unsigned int n_temporal_peaks, 
                               double
-                              T_final, double delta_min, double delta_max,
+                              T_final, double amplitude_min, double amplitude_max, double delta_min, double delta_max,
                               unsigned int seed = 42)
       : Function<dim>(1)
     {
       std::mt19937 rng(seed);
-      std::uniform_real_distribution<double> dist_amp(0.8, 2.5);
+      std::uniform_real_distribution<double> dist_amp(amplitude_min, amplitude_max);
       std::uniform_real_distribution<double> dist_coord(0.2, 0.8);
       std::uniform_real_distribution<double> dist_sigma(0.05, 0.15);
       
@@ -117,7 +117,7 @@ public:
       }
 
       // force the last peak to be at final time.
-      tau[n_temporal_peaks-1] = T_final;
+      tau[n_temporal_peaks-1] = T_final-0.1;
     }
 
     double get_spatial_part(const Point<dim> &p) const {
@@ -191,13 +191,13 @@ public:
     virtual double value(const Point<dim> &p, const unsigned int = 0) const override
     {
       double t = this->get_time();
-      double X = exact_solution.get_spatial_part(p);
-      double T = exact_solution.get_temporal_part(t);
+      double xp = exact_solution.get_spatial_part(p);
+      double tp = exact_solution.get_temporal_part(t);
       double T_prime = get_temporal_deriv(t);
       double laplacian_X = get_laplacian_spatial(p);
 
       // f = X * T' - alpha * (laplacian X) * T
-      return X * T_prime - alpha * laplacian_X * T;
+      return xp * T_prime - alpha * laplacian_X * tp;
     }
   };
 
@@ -286,6 +286,10 @@ private:
   get_delta_min_from_prm(ParameterHandler &prm);
   static double
   get_delta_max_from_prm(ParameterHandler &prm);
+  static double
+  get_amplitude_min_from_prm(ParameterHandler &prm);
+  static double
+  get_amplitude_max_from_prm(ParameterHandler &prm);
 
   // Problem definition. ///////////////////////////////////////////////////////
 
@@ -295,6 +299,8 @@ private:
   unsigned int random_seed;
   double delta_min;
   double delta_max;
+  double amplitude_min;
+  double amplitude_max;
 
   FunctionMu mu;
   PulsatingGaussianSolution<dim> exact_solution;
@@ -349,6 +355,7 @@ private:
   
   bool enable_space_adaptivity;
   bool enable_time_adaptivity;
+  bool enable_logging;
 
   // Time Adaptativity Parameters. ///////////////////////////////////////////////////////////
   unsigned int time_adapt_interval;

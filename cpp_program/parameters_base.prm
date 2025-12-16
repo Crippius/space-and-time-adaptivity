@@ -6,14 +6,17 @@
 subsection Adaptivity Control
   set Enable space adaptivity = false
   set Enable time adaptivity = false
+  set Enable logs = true
 end
 
 subsection Pulsating Gaussian Field
-  set Number of spatial peaks = 2
-  set Number of temporal peaks = 3
+  set Number of spatial peaks = 10
+  set Number of temporal peaks = 50
   set Random seed = 42
-  set Delta min = 0.05
-  set Delta max = 0.10
+  set Delta min = 0.01
+  set Delta max = 0.02
+  set Amplitude min = 100.0
+  set Amplitude max = 200.0
 end
 
 

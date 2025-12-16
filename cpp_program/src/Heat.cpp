@@ -13,6 +13,8 @@ Heat::declare_parameters(ParameterHandler &prm)
                       "If true, enables adaptive mesh refinement.");
     prm.declare_entry("Enable time adaptivity", "true", Patterns::Bool(), 
                       "If true, enables adaptive time stepping.");
+    prm.declare_entry("Enable logs", "false", Patterns::Bool(),
+                      "If true, enables console logging for intermediate results.");
   }
   prm.leave_subsection();
 
@@ -35,6 +37,8 @@ Heat::declare_parameters(ParameterHandler &prm)
     prm.declare_entry("Random seed", "42", Patterns::Integer(0), "Random seed for the Gaussian field");
     prm.declare_entry("Delta min", "0.1", Patterns::Double(0.0), "Minimum width of temporal Gaussian pulses");
     prm.declare_entry("Delta max", "0.3", Patterns::Double(0.0), "Maximum width of temporal Gaussian pulses");
+    prm.declare_entry("Amplitude min", "1.1", Patterns::Double(0.0), "Minimum amplitude of temporal Gaussian pulses");
+    prm.declare_entry("Amplitude max", "2.3", Patterns::Double(0.0), "Maximum amplitude of temporal Gaussian pulses");
   }
   prm.leave_subsection();
 
@@ -65,6 +69,7 @@ Heat::parse_parameters(ParameterHandler &prm)
   {
     enable_space_adaptivity = prm.get_bool("Enable space adaptivity");
     enable_time_adaptivity  = prm.get_bool("Enable time adaptivity");
+    enable_logging          = prm.get_bool("Enable logs");
   }
   prm.leave_subsection();
 
@@ -150,6 +155,23 @@ Heat::get_delta_max_from_prm(ParameterHandler &prm)
   const double delta_max = prm.get_double("Delta max");
   prm.leave_subsection();
   return delta_max;
+}double
+
+Heat::get_amplitude_min_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const double delta_min = prm.get_double("Amplitude min");
+  prm.leave_subsection();
+  return delta_min;
+}
+
+double
+Heat::get_amplitude_max_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const double delta_max = prm.get_double("Amplitude max");
+  prm.leave_subsection();
+  return delta_max;
 }
 
 Heat::Heat(ParameterHandler &prm)
@@ -158,7 +180,9 @@ Heat::Heat(ParameterHandler &prm)
     random_seed(get_random_seed_from_prm(prm)),
     delta_min(get_delta_min_from_prm(prm)),
     delta_max(get_delta_max_from_prm(prm)),
-    exact_solution(n_peaks, n_temporal_peaks, get_final_time_from_prm(prm), delta_min, delta_max, random_seed),
+    amplitude_min(get_amplitude_min_from_prm(prm)),
+    amplitude_max(get_amplitude_max_from_prm(prm)),
+    exact_solution(n_peaks, n_temporal_peaks, get_final_time_from_prm(prm),amplitude_min, amplitude_max, delta_min, delta_max, random_seed),
     forcing_term(exact_solution)
 {
   // Read the parameters from the ParameterHandler
@@ -255,8 +279,11 @@ Heat::setup()
 void
 Heat::assemble_matrices()
 {
-  pcout << "===============================================" << std::endl;
-  pcout << "Assembling the system matrices" << std::endl;
+  if (enable_logging)
+  {
+    pcout << "===============================================" << std::endl;
+    pcout << "Assembling the system matrices" << std::endl;
+  }
 
   const unsigned int dofs_per_cell = fe->dofs_per_cell;
   const unsigned int n_q           = quadrature->size();
@@ -395,8 +422,9 @@ Heat::solve_time_step()
   solver.solve(lhs_matrix, solution_owned, system_rhs, preconditioner);
   // Enforce hanging-node constraints on the solution
   constraints.distribute(solution_owned);
-  
-  pcout << "  " << solver_control.last_step() << " CG iterations" << std::endl;
+
+  if (enable_logging)
+    pcout << "  " << solver_control.last_step() << " CG iterations" << std::endl;
   
   solution = solution_owned;
 }
@@ -430,10 +458,13 @@ Heat::output(const unsigned int &time_step, const double &time)
 void
 Heat::refine_grid()
 {
-  pcout << "\n[Space adaptivity] Performing adaptive mesh refinement" << std::endl;
+  if (enable_logging)
+    pcout << "\n[Space adaptivity] Performing adaptive mesh refinement" << std::endl;
 
-  pcout << " Refining grid based on error estimation" << std::endl;
-  pcout << "  Number of active cells before refinement: "
+  if (enable_logging)
+    pcout << " Refining grid based on error estimation" << std::endl;
+  if (enable_logging)
+    pcout << "  Number of active cells before refinement: "
         << mesh.n_active_cells() << std::endl;
 
   Vector<float> estimated_error_per_cell(mesh.n_active_cells());
@@ -464,7 +495,8 @@ Heat::refine_grid()
   dof_handler.distribute_dofs(*fe);
   locally_owned_dofs    = dof_handler.locally_owned_dofs();
   DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
-  pcout << "  Number of DoFs after refinement = " << dof_handler.n_dofs() << std::endl;
+  if (enable_logging)
+    pcout << "  Number of DoFs after refinement = " << dof_handler.n_dofs() << std::endl;
 
   // Constraints
   constraints.clear();
@@ -494,7 +526,8 @@ Heat::refine_grid()
   constraints.distribute(solution_owned);
   solution = solution_owned;
 
-  pcout << "  Reassembling matrices for the refined mesh" << std::endl;
+  if (enable_logging)
+    pcout << "  Reassembling matrices for the refined mesh" << std::endl;
   assemble_matrices();
 }
 
@@ -571,7 +604,8 @@ bool Heat::adapt_time_step(const double &current_time,
   double time_error = estimate_time_error(current_time - deltat, solution_at_tn, deltat);
   time_error = Utilities::MPI::max(time_error, MPI_COMM_WORLD);
   
-  pcout << "    [Time adaptivity] Estimated error: " << time_error;
+  if (enable_logging)
+    pcout << "    [Time adaptivity] Estimated error: " << time_error;
   
   // If error is too large, reject the step
   if (time_error > time_error_upper_bound)
@@ -579,14 +613,16 @@ bool Heat::adapt_time_step(const double &current_time,
     double new_deltat = deltat / 2.0;
     if (new_deltat < min_deltat)
     {
-      pcout << " > upper bound, but deltat already at minimum. Accepting step." << std::endl;
+      if (enable_logging)
+        pcout << " > upper bound, but deltat already at minimum. Accepting step." << std::endl;
       // Can't reduce further, accept the step but don't increase deltat
       next_deltat = deltat;
       return true; 
     }
     else
     {
-      pcout << " > upper bound. REJECTING step, reducing deltat: " 
+      if (enable_logging)
+        pcout << " > upper bound. REJECTING step, reducing deltat: "
             << deltat << " -> " << new_deltat << std::endl;
       next_deltat = new_deltat;
       return false; // Reject
@@ -600,20 +636,23 @@ bool Heat::adapt_time_step(const double &current_time,
     double new_deltat = std::min(deltat * 2.0, max_deltat);
     if (new_deltat > deltat)
     {
-      pcout << " < lower bound. Accepting step, increasing deltat: " 
+      if (enable_logging)
+        pcout << " < lower bound. Accepting step, increasing deltat: "
             << deltat << " -> " << new_deltat << std::endl;
       next_deltat = new_deltat;
     }
     else
     {
-      pcout << " < lower bound, but deltat at maximum. Accepting step." << std::endl;
+      if (enable_logging)
+        pcout << " < lower bound, but deltat at maximum. Accepting step." << std::endl;
       next_deltat = deltat;
     }
   }
   else
   {
     // Error is in acceptable range
-    pcout << " in acceptable range. Accepting step, keeping deltat = " << deltat << std::endl;
+    if (enable_logging)
+      pcout << " in acceptable range. Accepting step, keeping deltat = " << deltat << std::endl;
     next_deltat = deltat;
   }
   
@@ -686,8 +725,9 @@ Heat::solve()
     TrilinosWrappers::MPI::Vector solution_before_step = solution_owned;
     double time_before_step = time;
     
-    pcout << "n = " << std::setw(3) << time_step << ", t = " << std::setw(5) << std::setprecision(4) << time 
-          << " -> " << time + deltat << ", deltat = " << deltat << ":" << std::flush;
+    if (enable_logging)
+      pcout << "n = " << std::setw(3) << time_step << ", t = " << std::setw(5) << std::setprecision(4) << time
+          << " -> " << time + deltat << ", deltat = " << deltat << ":" << std::endl<< std::flush ;
 
     // Take the time step
     time += deltat;
@@ -717,7 +757,6 @@ Heat::solve()
 std::chrono::high_resolution_clock::now();
     time_solve_step += t1 - t0;
 
-    pcout << std::endl;
 
     // Apply time adaptivity after computing the solution
     bool step_accepted = true;
@@ -728,7 +767,8 @@ std::chrono::high_resolution_clock::now();
       if (!step_accepted)
       {
         // Reject the step
-        pcout << "    Step REJECTED - redoing with smaller deltat" << std::endl;
+        if (enable_logging)
+          pcout << "    Step REJECTED - redoing with smaller deltat" << std::endl;
         solution_owned = solution_before_step;
         solution = solution_owned;
         time = time_before_step;
