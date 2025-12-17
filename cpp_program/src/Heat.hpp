@@ -83,23 +83,29 @@ public:
 
     PulsatingGaussianSolution(unsigned int n_spatial_peaks, unsigned int n_temporal_peaks, 
                               double
-                              T_final, double amplitude_min, double amplitude_max, double delta_min, double delta_max,
+                              T_final, double amplitude_min, double amplitude_max, double delta_min, double delta_max, double sigma_min, double sigma_max,
                               unsigned int seed = 42)
       : Function<dim>(1)
     {
       std::mt19937 rng(seed);
-      std::uniform_real_distribution<double> dist_amp(amplitude_min, amplitude_max);
-      std::uniform_real_distribution<double> dist_coord(0.2, 0.8);
-      std::uniform_real_distribution<double> dist_sigma(0.05, 0.15);
+      //std::uniform_real_distribution<double> dist_amp(amplitude_min, amplitude_max);
+      //std::uniform_real_distribution<double> dist_coord(0.2, 0.8);
+      //std::uniform_real_distribution<double> dist_sigma(0.05, 0.15);
       
       // Spatial setup
       a.resize(n_spatial_peaks);
       c.resize(n_spatial_peaks);
       sigma.resize(n_spatial_peaks);
+
+      double step_amp = (amplitude_max - amplitude_min)/(n_spatial_peaks-1);
+      double dist_x = 0.6 /  n_spatial_peaks;
+      double step_sigma = (sigma_max - sigma_min) / (n_spatial_peaks-1);
+
       for(unsigned int i=0; i<n_spatial_peaks; ++i) {
-        a[i] = dist_amp(rng);
-        for(unsigned int d=0; d<dim; ++d) c[i][d] = dist_coord(rng);
-        sigma[i] = dist_sigma(rng);
+        a[i] = amplitude_min + i * step_amp;
+        for(unsigned int d=0; d<dim; ++d)
+          c[i][d] = 0.2 + dist_x * ((i + d)%n_spatial_peaks);
+        sigma[i] = sigma_min + i*step_sigma;
       }
 
       // Temporal setup
@@ -107,17 +113,20 @@ public:
       tau.resize(n_temporal_peaks);
       delta.resize(n_temporal_peaks);
       
-      std::uniform_real_distribution<double> dist_time(0.1 * T_final, 0.9 * T_final);
-      std::uniform_real_distribution<double> dist_delta(delta_min, delta_max);
+      //std::uniform_real_distribution<double> dist_time(0.1 * T_final, 0.9 * T_final);
+      //std::uniform_real_distribution<double> dist_delta(delta_min, delta_max);
 
+      double step_time = 8.0/n_temporal_peaks;
+      step_amp = (amplitude_max - amplitude_min)/(n_temporal_peaks-1);
+      double step_delta = (delta_max - delta_min)/(n_temporal_peaks-1);
       for(unsigned int j=0; j<n_temporal_peaks; ++j) {
-        b[j] = dist_amp(rng);
-        tau[j] = dist_time(rng); 
-        delta[j] = dist_delta(rng);
+        b[j] = amplitude_min + j * step_amp;
+        tau[j] = 0.1 + j * step_time;
+        delta[j] = delta_min + j * step_delta;
       }
 
       // force the last peak to be at final time.
-      tau[n_temporal_peaks-1] = T_final-0.1;
+      tau[n_temporal_peaks-1] = T_final+delta[n_temporal_peaks-1]/2;
     }
 
     double get_spatial_part(const Point<dim> &p) const {
@@ -274,10 +283,10 @@ protected:
 
 private:
   // Helper functions to extract parameters for the constructor
-  static unsigned int
+  static double
   get_final_time_from_prm(ParameterHandler &prm);
   static unsigned int
-  get_n_peaks_from_prm(ParameterHandler &prm);
+  get_n_spatial_peaks_from_prm(ParameterHandler &prm);
   static unsigned int
   get_n_temporal_peaks_from_prm(ParameterHandler &prm);
   static unsigned int
@@ -286,6 +295,10 @@ private:
   get_delta_min_from_prm(ParameterHandler &prm);
   static double
   get_delta_max_from_prm(ParameterHandler &prm);
+  static double
+  get_sigma_min_from_prm(ParameterHandler &prm);
+  static double
+  get_sigma_max_from_prm(ParameterHandler &prm);
   static double
   get_amplitude_min_from_prm(ParameterHandler &prm);
   static double
@@ -301,18 +314,22 @@ private:
   double delta_max;
   double amplitude_min;
   double amplitude_max;
+  double sigma_min;
+  double sigma_max;
 
-  FunctionMu mu;
-  PulsatingGaussianSolution<dim> exact_solution;
-  PulsatingGaussianForcing<dim> forcing_term;
-  FunctionU0 u_0;
-  
   // Discretization. ///////////////////////////////////////////////////////////
   unsigned int r;
   double       T;
   double       deltat;
   double       theta;
   unsigned int output_interval;
+
+  // Forcing term and Analytical solution
+  FunctionMu mu;
+  PulsatingGaussianSolution<dim> exact_solution;
+  PulsatingGaussianForcing<dim> forcing_term;
+  FunctionU0 u_0;
+
 
   // MPI parallel metadata.
   const unsigned int mpi_size = Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD);

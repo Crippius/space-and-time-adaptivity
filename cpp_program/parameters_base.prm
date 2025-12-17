@@ -4,19 +4,21 @@
 # Adaptivity Control booleans
 # -----------------------------------------------
 subsection Adaptivity Control
-  set Enable space adaptivity = false
-  set Enable time adaptivity = false
+  set Enable space adaptivity = true
+  set Enable time adaptivity = true
   set Enable logs = true
 end
 
 subsection Pulsating Gaussian Field
-  set Number of spatial peaks = 10
-  set Number of temporal peaks = 50
+  set Number of spatial peaks = 5
+  set Number of temporal peaks = 2
   set Random seed = 42
-  set Delta min = 0.01
-  set Delta max = 0.02
-  set Amplitude min = 100.0
-  set Amplitude max = 200.0
+  set Delta min = 0.07
+  set Delta max = 0.01
+  set Sigma min = 0.02
+  set Sigma max = 0.04
+  set Amplitude min = 2.0
+  set Amplitude max = 3.0
 end
 
 
@@ -27,7 +29,7 @@ subsection Discretization
   set Degree              = 2
   set Global refinements  = 4
   set Final time          = 2.0
-  set Initial deltat      = 0.05
+  set Initial deltat      = 0.2
   set Theta               = 0.5
 end
 
@@ -46,9 +48,9 @@ end
 # Time Adaptivity Params
 # -----------------------------------------------
 subsection Time Adaptivity
-  set Adaptivity interval  = 1
-  set Error lower bound    = 0.05
-  set Error upper bound    = 0.2
-  set Min deltat           = 1e-4
-  set Max deltat           = 0.2
+  set Adaptivity interval  = 2
+  set Error lower bound    = 0.1
+  set Error upper bound    = 0.5
+  set Min deltat           = 0.05
+  set Max deltat           = 0.35
 end

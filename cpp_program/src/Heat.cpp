@@ -37,6 +37,8 @@ Heat::declare_parameters(ParameterHandler &prm)
     prm.declare_entry("Random seed", "42", Patterns::Integer(0), "Random seed for the Gaussian field");
     prm.declare_entry("Delta min", "0.1", Patterns::Double(0.0), "Minimum width of temporal Gaussian pulses");
     prm.declare_entry("Delta max", "0.3", Patterns::Double(0.0), "Maximum width of temporal Gaussian pulses");
+    prm.declare_entry("Sigma min", "0.1", Patterns::Double(0.01), "Minimum width of spatial Gaussian pulses");
+    prm.declare_entry("Sigma max", "0.2", Patterns::Double(0.0), "Maximum width of spatial Gaussian pulses");
     prm.declare_entry("Amplitude min", "1.1", Patterns::Double(0.0), "Minimum amplitude of temporal Gaussian pulses");
     prm.declare_entry("Amplitude max", "2.3", Patterns::Double(0.0), "Maximum amplitude of temporal Gaussian pulses");
   }
@@ -104,21 +106,21 @@ Heat::parse_parameters(ParameterHandler &prm)
 }
 
 unsigned int
-Heat::get_n_peaks_from_prm(ParameterHandler &prm)
+Heat::get_n_spatial_peaks_from_prm(ParameterHandler &prm)
 {
   prm.enter_subsection("Pulsating Gaussian Field");
-  const unsigned int n_peaks = prm.get_integer("Number of spatial peaks");
+  const unsigned int val = prm.get_integer("Number of spatial peaks");
   prm.leave_subsection();
-  return n_peaks;
+  return val;
 }
 
-unsigned int
+double
 Heat::get_final_time_from_prm(ParameterHandler &prm)
 {
-  prm.enter_subsection("Pulsating Gaussian Field");
-  const unsigned int n_peaks = prm.get_integer("Number of spatial peaks");
+  prm.enter_subsection("Discretization");
+  const double val = prm.get_double("Final time");
   prm.leave_subsection();
-  return n_peaks;
+  return val;
 }
 
 unsigned int
@@ -134,27 +136,44 @@ unsigned int
 Heat::get_random_seed_from_prm(ParameterHandler &prm)
 {
   prm.enter_subsection("Pulsating Gaussian Field");
-  const unsigned int random_seed = prm.get_integer("Random seed");
+  const unsigned int val = prm.get_integer("Random seed");
   prm.leave_subsection();
-  return random_seed;
+  return val;
 }
 
 double
 Heat::get_delta_min_from_prm(ParameterHandler &prm)
 {
   prm.enter_subsection("Pulsating Gaussian Field");
-  const double delta_min = prm.get_double("Delta min");
+  const double val = prm.get_double("Delta min");
   prm.leave_subsection();
-  return delta_min;
+  return val;
 }
 
 double
 Heat::get_delta_max_from_prm(ParameterHandler &prm)
 {
   prm.enter_subsection("Pulsating Gaussian Field");
-  const double delta_max = prm.get_double("Delta max");
+  const double val = prm.get_double("Delta max");
   prm.leave_subsection();
-  return delta_max;
+  return val;
+}double
+
+Heat::get_sigma_min_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const double val = prm.get_double("Sigma min");
+  prm.leave_subsection();
+  return val;
+}
+
+double
+Heat::get_sigma_max_from_prm(ParameterHandler &prm)
+{
+  prm.enter_subsection("Pulsating Gaussian Field");
+  const double val = prm.get_double("Sigma max");
+  prm.leave_subsection();
+  return val;
 }double
 
 Heat::get_amplitude_min_from_prm(ParameterHandler &prm)
@@ -175,14 +194,17 @@ Heat::get_amplitude_max_from_prm(ParameterHandler &prm)
 }
 
 Heat::Heat(ParameterHandler &prm)
-  : n_peaks(get_n_peaks_from_prm(prm)),
+  : n_peaks(get_n_spatial_peaks_from_prm(prm)),
     n_temporal_peaks(get_n_temporal_peaks_from_prm(prm)),
     random_seed(get_random_seed_from_prm(prm)),
     delta_min(get_delta_min_from_prm(prm)),
     delta_max(get_delta_max_from_prm(prm)),
     amplitude_min(get_amplitude_min_from_prm(prm)),
     amplitude_max(get_amplitude_max_from_prm(prm)),
-    exact_solution(n_peaks, n_temporal_peaks, get_final_time_from_prm(prm),amplitude_min, amplitude_max, delta_min, delta_max, random_seed),
+    sigma_min(get_sigma_min_from_prm(prm)),
+    sigma_max(get_sigma_max_from_prm(prm)),
+    T(get_final_time_from_prm(prm)),
+    exact_solution(n_peaks, n_temporal_peaks, T,amplitude_min, amplitude_max, delta_min, delta_max, sigma_min, sigma_max, random_seed),
     forcing_term(exact_solution)
 {
   // Read the parameters from the ParameterHandler
