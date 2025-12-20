@@ -98,13 +98,18 @@ public:
       sigma.resize(n_spatial_peaks);
 
       double step_amp = (amplitude_max - amplitude_min)/(n_spatial_peaks-1);
-      double dist_x = 0.6 /  n_spatial_peaks;
+      double dist_x = 1.0 /  10313;
       double step_sigma = (sigma_max - sigma_min) / (n_spatial_peaks-1);
+      unsigned int prev = 1;
 
       for(unsigned int i=0; i<n_spatial_peaks; ++i) {
         a[i] = amplitude_min + i * step_amp;
-        for(unsigned int d=0; d<dim; ++d)
-          c[i][d] = 0.2 + dist_x * ((i + d)%n_spatial_peaks);
+        for(unsigned int d=0; d<dim; ++d){
+          unsigned int tmp = ((i*prev*10353 +1+ d))%10313;
+          c[i][d] = dist_x * tmp;
+          prev = tmp;
+
+        }
         sigma[i] = sigma_min + i*step_sigma;
       }
 
