@@ -107,5 +107,5 @@ From: ubuntu:22.04
 
 %runscript
     echo "Container per simulazioni deal.II MPI."
-    echo "Applicazione compilata in /app/build/lab-06 <nglobalrefinments> <deltat> "
-    echo "Eseguire con: mpirun singularity exec <container.sif> /app/build/lab-06"
+    echo "Applicazione compilata in /app/build/main"
+    echo "Eseguire con: mpirun singularity exec <container.sif> /app/build/main /path/to/params.prm"
