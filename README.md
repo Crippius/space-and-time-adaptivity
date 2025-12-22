@@ -6,10 +6,6 @@ This project explores **adaptive methods** in both **space and time** for solvin
 
 # TODO add final results.csv file inside results folder
 
-# TODO add cool image
-
-![cool_image]()
-
 **Students**
 
 - [Leonardo Arnaboldi](https://github.com/leo-arnaboldi)
@@ -102,6 +98,12 @@ There is a template parameter file `parameters_base.prm` that can be used for th
 ```bash
 ./main ../parameters_base.prm
 ```
+
+## Results
+
+<p align="center">
+  <img src="assets/results.gif" width="720" alt="Demo del programma">
+</p>
 
 ## Testing
 
