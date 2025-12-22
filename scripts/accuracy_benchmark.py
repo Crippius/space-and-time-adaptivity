@@ -15,14 +15,11 @@ EXECUTABLE_PATH = Path("../cpp_program/build/main").resolve()
 # Path to the error computation script
 ERROR_SCRIPT_PATH = Path("./compute_error.py").resolve()
 
-# Percorso della soluzione di riferimento ("golden")
-GOLDEN_REFERENCE_PATH = Path("../golden_reference/ref_7_0.0005/solution_9999.pvtu").resolve()
-
 # Main directory where all results will be saved
 RUNS_DIR = Path("../test_runs").resolve()
 
 # Base parameter file to start from
-BASE_PARAMETERS_FILE = Path("../parameters_base.prm").resolve()
+BASE_PARAMETERS_FILE = Path("../cpp_program/parameters_base.prm").resolve()
 
 # Output CSV file name
 RESULTS_CSV_PATH = RUNS_DIR / "results.csv"
@@ -96,11 +93,14 @@ def parse_metrics_from_log(log_path):
     """Parses the C++ simulation log and extracts metrics."""
     metrics = {}
     patterns = {
-        "total_time": r"Total Wall-clock time \(t\):\s+([\d\.\-eE]+)",
-        "n_dofs": r"Maximum Degrees of Freedom \(n_Omega\):\s+([\d\.\-eE]+)",
+        "total_time": r"Total Wall-clock time \(t\):\s+([\d\.\-eE]+)\s*s",
+        "n_dofs": r"Final Degrees of Freedom \(n_Omega\):\s+([\d\.\-eE]+)",
         "h_min": r"Minimum cell diameter \(h\):\s+([\d\.\-eE]+)",
         "r_res": r"r_res \(h / n_Omega\):\s+([\d\.\-eE]+)",
         "r_t_per_dof": r"r_t-per-DOF \(t / n_Omega\):\s+([\d\.\-eE]+)",
+        "l2_error": r"Final L2 Error\s*:\s+([\d\.\-eE]+)",
+        "l2_norm_exact": r"L2 Norm of Exact Sol\s*:\s+([\d\.\-eE]+)",
+        "relative_l2_error": r"Relative L2 Error\s*:\s+([\d\.\-eE]+)",
     }
     try:
         with open(log_path, "r") as f:
@@ -145,63 +145,6 @@ def parse_all_parameters_from_prm(prm_path):
         return {}
         
     return params
-
-# Runs the error computation script, which writes the result to a temporary file.
-def run_error_computation(run_dir, reference_path):
-    """
-    Runs the error computation script, which writes the result to a temporary file.
-    This script then reads and deletes the file.
-    """
-    # Prefer parallel output .pvtu (MPI), fallback to single .vtu (serial)
-    pvtu_path = run_dir / "output_9999.pvtu"
-    vtu_path = run_dir / "output_9999.vtu"
-    test_solution_path = pvtu_path if pvtu_path.exists() else vtu_path
-    result_file_path = run_dir / "error_result.tmp"
-
-    if not test_solution_path.exists():
-        print(f"  -> ERROR: Solution file 'output_9999.vtu' not found in {run_dir}")
-        return None
-    
-    command = [
-        sys.executable,
-        str(ERROR_SCRIPT_PATH),
-        "--reference", str(reference_path),
-        "--test-solution", str(test_solution_path),
-        "--output-file", str(result_file_path)
-    ]
-    
-    print("  -> Computing L2 error (using temporary file)...")
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=300 # Aumentato a 5 minuti per sicurezza
-        )
-        if not result_file_path.exists():
-            print("  -> ERROR: The result file was not created by the error script.")
-            return None
-        with open(result_file_path, 'r') as f:
-            l2_error = float(f.read().strip())
-        print(f"  -> Computed L2 error: {l2_error}")
-        return l2_error
-    except subprocess.TimeoutExpired:
-        print("  -> ERROR: Error computation exceeded the time limit.")
-        return None
-    except subprocess.CalledProcessError as e:
-        print(f"  -> ERROR: The error computation script failed (code {e.returncode}).")
-        print(f"--- Error message from script:\n{e.stderr}\n---")
-        return None
-    except (ValueError, IndexError):
-        print("  -> ERROR: The result file did not contain a valid number.")
-        return None
-    except Exception as e:
-        print(f"  -> UNEXPECTED ERROR during error computation: {e}")
-        return None
-    finally:
-        if result_file_path.exists():
-            os.remove(result_file_path)
 
 # Writes the results to a CSV file
 def write_results_to_csv(filepath, data_list):
@@ -258,7 +201,7 @@ def main():
             # Data extraction
             all_params = parse_all_parameters_from_prm(params_path)
             perf_metrics = parse_metrics_from_log(log_path)
-            l2_error = run_error_computation(current_run_dir, GOLDEN_REFERENCE_PATH)
+            l2_error = perf_metrics.get('l2_error')
             
             # Compute derived metrics
             derived_metrics = {}
@@ -288,8 +231,8 @@ def main():
     write_results_to_csv(RESULTS_CSV_PATH, all_results_data)
 
 if __name__ == "__main__":
-    if not all([p.exists() for p in [EXECUTABLE_PATH, ERROR_SCRIPT_PATH, GOLDEN_REFERENCE_PATH, BASE_PARAMETERS_FILE]]):
+    if not all([p.exists() for p in [EXECUTABLE_PATH, ERROR_SCRIPT_PATH, BASE_PARAMETERS_FILE]]):
         print("ERROR: One or more essential files/paths were not found.")
-        print(f"Check that the following exist:\n- Executable: {EXECUTABLE_PATH}\n- Error Script: {ERROR_SCRIPT_PATH}\n- Reference: {GOLDEN_REFERENCE_PATH}\n- Base Parameters: {BASE_PARAMETERS_FILE}")
+        print(f"Check that the following exist:\n- Executable: {EXECUTABLE_PATH}\n- Error Script: {ERROR_SCRIPT_PATH}\n- Base Parameters: {BASE_PARAMETERS_FILE}")
     else:
         main()
