@@ -70,16 +70,17 @@ conda activate pdeEnv
 To build the executable, make sure you have loaded the needed modules with
 
 ```bash
-$ module load gcc-glibc dealii
+module load gcc-glibc dealii
 ```
 
 Then run the following commands:
 
 ```bash
-$ mkdir build
-$ cd build
-$ cmake ..
-$ make
+cd cpp_program
+mkdir build
+cd build
+cmake ..
+make
 ```
 
 ## Execution
@@ -96,16 +97,16 @@ where `parameter_file.prm` is a file that contains all of the hyperparameters ut
 - Discretization Details
 - More advanced parameters for space and time adaptivity
 
-The template parameter file at the root directory `parameters_base.prm` can be used for the execution by writing:
+The template parameter file `parameters_base.prm` can be used for the execution by writing:
 
 ```bash
-$ ./main ../../parameters_base.prm
+./main ../parameters_base.prm
 ```
 
 To run the automatic tester that executes different configurations of the solver type:
 
 ```bash
-$ python scripts/accuracy_benchmark.py
+python scripts/accuracy_benchmark.py
 ```
 
 The program will save each simulation `.vtu` files inside a dedicated folder in the `test_runs` directory, together with the output log and their own parameter file. The summary of all the runs will be found inside `results.csv`.
@@ -117,24 +118,31 @@ For testing strong scaling performance with different MPI process counts:
 **Local testing:**
 
 ```bash
-$ cd scripts && ./scalability_benchmark.sh
+cd scripts && ./scalability_benchmark.sh
 ```
 
 Results are saved to CSV files with speedup and efficiency metrics.
 
 ## Project Structure
 
-# TODO check if correct
-
 ```text
 root/
-├── src/
-│   ├── Heat.hpp
-│   ├── Heat.cpp
-│   └── main.cpp
-├── results/
-│   ├── plot_results.ipynb
-│   └── results.csv
-├── CMakeLists.txt
-└── report.pdf
+├── cpp_program/                     # Main C++ solver implementation
+│   ├── src/
+│   │   ├── Heat.hpp                # Heat equation solver class header
+│   │   ├── Heat.cpp                # Heat equation solver implementation
+│   │   └── main.cpp                # Entry point, parameter parsing
+│   ├── build/                      # Compiled binaries
+│   ├── tests/                      # Test utilities and scripts
+│   ├── CMakeLists.txt              # Build configuration
+│   ├── CMakeLists_singularity.txt  # Build config for Singularity containers
+│   ├── parameters_base.prm         # Template parameter file for solver
+│   └── singularity.def             # Container definition file
+├── scripts/                        # Python benchmarking and analysis tools
+│   ├── accuracy_benchmark.py       # Runs multiple configurations, computes errors
+│   ├── analyze_scalability.py      # Analyzes scalability benchmark results
+│   ├── scalability_benchmark.sh    # Strong scaling test runner
+│   └── scalability_results/        # Scalability benchmark output files
+├── pdeEnv.yml                      # Conda environment specification
+└── README.md                       # This file
 ```
