@@ -88,50 +88,36 @@ public:
       : Function<dim>(1)
     {
       std::mt19937 rng(seed);
-      //std::uniform_real_distribution<double> dist_amp(amplitude_min, amplitude_max);
-      //std::uniform_real_distribution<double> dist_coord(0.2, 0.8);
-      //std::uniform_real_distribution<double> dist_sigma(0.05, 0.15);
-      
+      std::uniform_real_distribution<double> dist_amp(amplitude_min, amplitude_max);
+      std::uniform_real_distribution<double> dist_coord(0.1, 0.9);
+      std::uniform_real_distribution<double> dist_sigma(sigma_min, sigma_max);
+
       // Spatial setup
       a.resize(n_spatial_peaks);
       c.resize(n_spatial_peaks);
       sigma.resize(n_spatial_peaks);
-
-      double step_amp = (amplitude_max - amplitude_min)/(n_spatial_peaks-1);
-      double dist_x = 1.0 /  10313;
-      double step_sigma = (sigma_max - sigma_min) / (n_spatial_peaks-1);
-      unsigned int prev = 1;
-
       for(unsigned int i=0; i<n_spatial_peaks; ++i) {
-        a[i] = amplitude_min + i * step_amp;
-        for(unsigned int d=0; d<dim; ++d){
-          unsigned int tmp = ((i*prev*10353 +1+ d))%10313;
-          c[i][d] = dist_x * tmp;
-          prev = tmp;
-
-        }
-        sigma[i] = sigma_min + i*step_sigma;
+        a[i] = dist_amp(rng);
+        for(unsigned int d=0; d<dim; ++d) c[i][d] = dist_coord(rng);
+        sigma[i] = dist_sigma(rng);
       }
 
       // Temporal setup
       b.resize(n_temporal_peaks);
       tau.resize(n_temporal_peaks);
       delta.resize(n_temporal_peaks);
-      
-      //std::uniform_real_distribution<double> dist_time(0.1 * T_final, 0.9 * T_final);
-      //std::uniform_real_distribution<double> dist_delta(delta_min, delta_max);
 
-      double step_time = 8.0/n_temporal_peaks;
-      step_amp = (amplitude_max - amplitude_min)/(n_temporal_peaks-1);
-      double step_delta = (delta_max - delta_min)/(n_temporal_peaks-1);
+      std::uniform_real_distribution<double> dist_time(0.1 * T_final, 0.9 * T_final);
+      std::uniform_real_distribution<double> dist_delta(delta_min, delta_max);
+
       for(unsigned int j=0; j<n_temporal_peaks; ++j) {
-        b[j] = amplitude_min + j * step_amp;
-        tau[j] = 0.1 + j * step_time;
-        delta[j] = delta_min + j * step_delta;
+        b[j] = dist_amp(rng);
+        tau[j] = dist_time(rng);
+        delta[j] = dist_delta(rng);
       }
 
       // force the last peak to be at final time.
-      tau[n_temporal_peaks-1] = T_final+delta[n_temporal_peaks-1]/2;
+      tau[n_temporal_peaks-1] = T_final+delta[n_temporal_peaks-1];
     }
 
     double get_spatial_part(const Point<dim> &p) const {
