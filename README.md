@@ -4,7 +4,7 @@
 
 This project explores **adaptive methods** in both **space and time** for solving partial differential equations. We focus on the heat equation with a localized, time-dependent forcing term characterized by sharp, frequent impulses. The goal is to capture steep solution features accurately while minimizing computational cost through dynamic mesh and time step refinement based on error estimates. We implemented an adaptive solver using the `deal.II` library and evaluated its effectiveness in terms of accuracy and efficiency.
 
-# TODO add colab notebook and final results.csv file inside results folder
+# TODO add final results.csv file inside results folder
 
 # TODO add cool image
 
@@ -49,7 +49,7 @@ $$
 - **C++** compiler (C++11 or later).
 - **CMake** ≥ 3.12.
 
-To utilize the automatic tester or visualize the solver's statistic on the notebook inside the results folder, you can set up the conda environment named `pdeEnv` to properly run the python scripts in two simple steps:
+To utilize the python scripts inside the `scripts` directory, you can set up the conda environment named `pdeEnv` to properly run the python scripts in two simple steps:
 
 ---
 
@@ -97,11 +97,15 @@ where `parameter_file.prm` is a file that contains all of the hyperparameters ut
 - Discretization Details
 - More advanced parameters for space and time adaptivity
 
-The template parameter file `parameters_base.prm` can be used for the execution by writing:
+There is a template parameter file `parameters_base.prm` that can be used for the execution by writing:
 
 ```bash
 ./main ../parameters_base.prm
 ```
+
+## Testing
+
+### Accuracy Benchmark
 
 To run the automatic tester that executes different configurations of the solver type:
 
@@ -111,7 +115,7 @@ python scripts/accuracy_benchmark.py
 
 The program will save each simulation `.vtu` files inside a dedicated folder in the `test_runs` directory, together with the output log and their own parameter file. The summary of all the runs will be found inside `results.csv`.
 
-## Scalability Testing
+### Scalability Testing
 
 For testing strong scaling performance with different MPI process counts:
 
