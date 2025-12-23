@@ -4,8 +4,6 @@
 
 This project explores **adaptive methods** in both **space and time** for solving partial differential equations. We focus on the heat equation with a localized, time-dependent forcing term characterized by sharp, frequent impulses. The goal is to capture steep solution features accurately while minimizing computational cost through dynamic mesh and time step refinement based on error estimates. We implemented an adaptive solver using the `deal.II` library and evaluated its effectiveness in terms of accuracy and efficiency.
 
-# TODO add final results.csv file inside results folder
-
 **Students**
 
 - [Leonardo Arnaboldi](https://github.com/leo-arnaboldi)
@@ -29,15 +27,13 @@ u &= 0 && \text{in } \Omega \times \{0\},
 \end{cases}
 $$
 
-$$
-f(\mathbf{x},t) = g(t)h(\mathbf{x}), \quad
-g(t) = \frac{\exp(-a \cos(2N \pi t))}{\exp(a)}, \quad
-h(\mathbf{x}) = \exp\left(-\left(\frac{|\mathbf{x} - \mathbf{x}_0|}{\sigma}\right)^2\right),
-$$
+where $\Omega = (0,1)^3$ is the unit cube, $\mu = 1$ is the diffusion coefficient, and the forcing term has separable form:
 
 $$
-\text{where } a > 0,\; N \in \mathbb{N},\; x_0 \in \Omega,\; \text{and } \sigma > 0.
+f(\mathbf{x},t) = g(t)h(\mathbf{x}),
 $$
+
+with $g$ and $h$ being smooth functions in time and space, respectively.
 
 ## Prerequisites
 
@@ -127,8 +123,8 @@ The scalability tests are managed via Slurm scripts. To execute the benchmark on
 cd scripts
 sbatch scalability_MN.slurm
 ```
-The results from the scalability benchmarks are available in the `results/` directory.
 
+The results from the scalability benchmarks are available in the `results/` directory.
 
 ## Project Structure
 
@@ -148,8 +144,10 @@ root/
 ├── scripts/                        # Python benchmarking and analysis tools
 │   ├── accuracy_benchmark.py       # Runs multiple configurations, computes errors
 │   ├── analyze_scalability.py      # Analyzes scalability benchmark results
-│   ├── scalability_benchmark.sh    # Strong scaling test runner
-│   └── scalability_results/        # Scalability benchmark output files
+│   └── scalability_benchmark.sh    # Strong scaling test runner
+├── results/                        # Benchmark and test results
+├── plot_custom_data.py             # Plotting utility for custom data
 ├── pdeEnv.yml                      # Conda environment specification
+├── report.pdf                      # Final project report
 └── README.md                       # This file
 ```
