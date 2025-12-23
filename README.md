@@ -119,15 +119,16 @@ The program will save each simulation `.vtu` files inside a dedicated folder in 
 
 ### Scalability Testing
 
-For testing strong scaling performance with different MPI process counts:
+In order to run our solver on the **MareNostrum HPC cluster** of the Barcelona Supercomputing Center, we adopted a container-based approach using **Singularity**.
 
-**Local testing:**
+The scalability tests are managed via Slurm scripts. To execute the benchmark on the General Purpose (GP) partition, submit the following job:
 
 ```bash
-cd scripts && ./scalability_benchmark.sh
-```
+cd scripts
+sbatch scalability_MN.slurm
 
-Results are saved to CSV files with speedup and efficiency metrics.
+The results from the scalability benchmarks are available in the `results/` directory.
+
 
 ## Project Structure
 
