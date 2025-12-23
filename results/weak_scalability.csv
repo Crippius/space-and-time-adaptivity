@@ -1,4 +1,4 @@
-﻿Num CPUs;Global refinements;Num Dofs;Execution time;Parallel efficiency
-2;4;120375;30.4406;1
-12;5;619019;37.2092;0.818093375
-64;6;3.47E+06;49.8874;0.610186139
+Num CPUs,Global refinements,Num Dofs,Execution time (s),Parallel efficiency
+2,4,120375,30.4406,1.000
+12,5,619019,37.2092,0.818
+64,6,3470000,49.8874,0.610
