@@ -1,6 +1,6 @@
 # Space and Time adaptivity
 
-#### Numerical Methods for Partial Differential Equations – Project 2024/25 - Politecnico di Milano
+#### Numerical Methods for Partial Differential Equations – Project 2025/26 - Politecnico di Milano
 
 This project explores **adaptive methods** in both **space and time** for solving partial differential equations. We focus on the heat equation with a localized, time-dependent forcing term characterized by sharp, frequent impulses. The goal is to capture steep solution features accurately while minimizing computational cost through dynamic mesh and time step refinement based on error estimates. We implemented an adaptive solver using the `deal.II` library and evaluated its effectiveness in terms of accuracy and efficiency.
 
