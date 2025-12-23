@@ -126,7 +126,7 @@ The scalability tests are managed via Slurm scripts. To execute the benchmark on
 ```bash
 cd scripts
 sbatch scalability_MN.slurm
-
+```
 The results from the scalability benchmarks are available in the `results/` directory.
 
 
